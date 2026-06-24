@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "microsoft-IsvExpTools.powerplatform-vscode",
+    "redhat.vscode-yaml",
+    "ms-vscode.powershell",
+    "GitHub.copilot"
+  ]
+}

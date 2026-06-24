@@ -1,0 +1,12 @@
+mcs.metadata:
+  componentName: TableTalk - Fabric - Refresh dataset
+  description: This flow is triggered manually and takes two text inputs. It uses these inputs to refresh a dataset in Power BI. After attempting the refresh, it responds to the agent with a message indicating whether the dataset was successfully refreshed or if there was an error. The logical sequence of actions is determined by the outcome of the dataset refresh, ensuring the agent receives appropriate feedback based on the result.
+kind: WorkflowTool
+workflowId: 5e10968d-a142-f111-bec7-7ced8d3c7b0f
+toolInputs:
+  - name: text
+
+  - name: text_1
+
+toolOutputs:
+  - name: result

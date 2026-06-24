@@ -1,0 +1,23 @@
+﻿mcs.metadata:
+  componentName: RefreshDataset
+kind: TaskDialog
+inputs:
+  - kind: AutomaticTaskInput
+    propertyName: text
+    name: workspaceid
+    description: Power BI workspace ID. Default is f9b7b05b-44c8-4740-9372-b9a958007c63
+  - kind: AutomaticTaskInput
+    propertyName: text_1
+    name: datasetid
+    description: Power BI dataset ID. Default is 3edbaf84-2fe8-47d8-b4c8-97bd8d6c806b
+modelDisplayName: Refresh Dataset
+modelDescription: Refreshes the ContosoRetail dataset. Call this first before any queries.
+outputs:
+  - propertyName: result
+action:
+  kind: InvokeFlowTaskAction
+  flowId: 5e10968d-a142-f111-bec7-7ced8d3c7b0f
+  connectionProperties:
+    $kind: ConnectionProperties
+    mode: Creator
+outputMode: All

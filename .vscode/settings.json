@@ -1,0 +1,12 @@
+{
+  "powerPlatform.experimental.pacDirectory": "C:\\Users\\kkanjitajdin\\.nuget\\packages\\microsoft.powerapps.cli\\2.8.1\\tools",
+  "files.associations": {
+    "*.mcs.yml": "yaml"
+  },
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/microsoft/PowerApps-Tooling/main/src/PAModel/Schemas/mcs/mcs-schema.json": "*.mcs.yml"
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml"
+  }
+}

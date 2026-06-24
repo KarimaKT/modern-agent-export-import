@@ -1,0 +1,27 @@
+﻿mcs.metadata:
+  componentName: ExecuteDAX
+kind: TaskDialog
+inputs:
+  - kind: AutomaticTaskInput
+    propertyName: text
+    name: DaxQuery
+    description: The DAX query to execute. Use SUMMARIZECOLUMNS and TOPN for aggregations.
+  - kind: AutomaticTaskInput
+    propertyName: text_1
+    name: workspaceid
+    description: Power BI workspace ID. Default is f9b7b05b-44c8-4740-9372-b9a958007c63
+  - kind: AutomaticTaskInput
+    propertyName: text_2
+    name: datasetid
+    description: Power BI dataset ID. Default is 3edbaf84-2fe8-47d8-b4c8-97bd8d6c806b
+modelDisplayName: Execute DAX
+modelDescription: Executes a DAX query against the ContosoRetail Power BI dataset. Returns results as text.
+outputs:
+  - propertyName: daxqueryresults
+action:
+  kind: InvokeFlowTaskAction
+  flowId: b5d08619-c241-f111-bec7-6045bd024dba
+  connectionProperties:
+    $kind: ConnectionProperties
+    mode: Creator
+outputMode: All

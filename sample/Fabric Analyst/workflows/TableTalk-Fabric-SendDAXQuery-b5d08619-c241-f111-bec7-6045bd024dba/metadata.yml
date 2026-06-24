@@ -1,0 +1,30 @@
+﻿jsonFileName: workflows/TableTalk-Fabric-SendDAXQuery-b5d08619-c241-f111-bec7-6045bd024dba/workflow.json
+workflowId: b5d08619-c241-f111-bec7-6045bd024dba
+name: TableTalk - Fabric - Send DAX Query
+type: 1
+description: This flow receives a request containing a DAX query and a dataset ID. It attempts to run the query against the specified dataset. If successful, it returns the first 100 records or up to 30,000 characters from the results. If the query fails or times out, it responds with the error details. The flow ensures that only relevant data or error information is sent back to the requester, making it useful for querying Power BI datasets and handling both successful and failed outcomes efficiently.
+subprocess: false
+category: 5
+mode: 0
+scope: 4
+onDemand: false
+triggerOnCreate: false
+triggerOnDelete: false
+asyncAutodelete: false
+syncWorkflowLogOnFailure: false
+stateCode: 1
+statusCode: 2
+runAs: 1
+isTransacted: true
+introducedVersion: 1.0
+isCustomizable:
+  value: true
+  canBeChanged: true
+  managedPropertyLogicalName: iscustomizableanddeletable
+businessProcessType: 
+isCustomProcessingStepAllowedForOtherPublishers:
+  value: true
+  canBeChanged: true
+  managedPropertyLogicalName: canbedeleted
+modernFlowType: 1
+primaryEntity: none

@@ -1,0 +1,11 @@
+mcs.metadata:
+  componentName: TableTalk - Fabric - Send DAX Query
+  description: This flow receives a request containing a DAX query and a dataset ID. It attempts to run the query against the specified dataset. If successful, it returns the first 100 records or up to 30,000 characters from the results. If the query fails or times out, it responds with the error details. The flow ensures that only relevant data or error information is sent back to the requester, making it useful for querying Power BI datasets and handling both successful and failed outcomes efficiently.
+kind: WorkflowTool
+workflowId: b5d08619-c241-f111-bec7-6045bd024dba
+toolInputs:
+  - name: text
+
+  - name: text_2
+
+  - name: text_1
