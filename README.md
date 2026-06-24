@@ -264,3 +264,69 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+
+---
+
+## End-to-End Test Results (Jun 24, 2026)
+
+### What Was Tested
+- **Source**: Fabric Analyst agent in CDX (`orgea8005ed`) — `cliagent-1.0.0` template
+- **Target**: Zava PP (`org07697283`)
+
+### What Worked ✅
+
+| Step | Result |
+|------|--------|
+| DV API skill discovery (type 9 botcomponents) | ✅ `data` field contains InlineAgentSkill YAML |
+| Agent creation via `POST /api/data/v9.2/bots` | ✅ Creates a new NGO agent |
+| `pac copilot clone` of new empty agent | ✅ Gets a valid workspace for the target env |
+| `pac copilot push` (flowId stripped) | ✅ 7 changes: settings, action botcomponents, GPT config |
+| Connection reference creation via DV API | ✅ `POST /api/data/v9.2/connectionreferences` |
+| Flow creation via DV API (`statecode=0, statuscode=1`) | ✅ Flows created in Draft state |
+| `pac copilot push` (with new flowId) | ✅ 8 changes: action botcomponents linked to flows |
+| Skill upload via `POST /api/data/v9.2/botcomponents` | ✅ `schema-definitions-and-dax` visible in Copilot Studio |
+| Agent visible in Copilot Studio | ✅ "Fabric Analyst" in Zava PP agents list |
+
+### What pac push Does NOT Do (Discovered) ❌
+
+1. **pac push does NOT create new agents** — `Entity 'bot' With Id = ... Does Not Exist`. You must create the bot via DV API first.
+
+2. **pac push does NOT create Power Automate flows** — `Entity 'Workflow' With Id = ... Does Not Exist`. The `workflows/` directory content is ignored unless the flow already exists. You must create flows separately via the DV API.
+
+3. **pac push requires a workspace linked to the target env** — the `.mcs/botdefinition.json` from a source env clone contains env-specific types (`CloudFlowDefinition`, `UnknownDialogBase` in pac 2.8.1) that cause crashes. You must clone from the TARGET env first.
+
+4. **pac push requires `AgentId` to be non-null** — `Sync info is missing Id` error. The bot must pre-exist.
+
+### The Flow ID Problem — Confirmed
+
+pac push with source-env `flowId` in action YAML fails with:
+```
+{"errors":[{"code":10000,"message":"Entity 'Workflow' With Id = b5d08619... Does Not Exist"}]}
+```
+
+The fix is:
+1. Strip `flowId` from action YAMLs before first push → creates action botcomponents without flow links
+2. Create flows via DV API → get new GUIDs  
+3. Add `flowId` with new GUIDs → re-push → links actions to flows
+
+### Instructions Not Visible in New UI
+
+The Copilot Studio "New experience" UI shows a blank instructions field. The instructions in `settings.mcs.yml` (`StaticSegment`) ARE pushed correctly (verified via DV API `configuration` field), but the new UI displays them differently than the classic view. The agent will run with the correct instructions.
+
+### Skills — Confirmed Working
+
+The `schema-definitions-and-dax` skill appears in the Copilot Studio Skills section after `POST /api/data/v9.2/botcomponents`. The skill knowledge is immediately available to the agent.
+
+### Flows Require Manual Connection
+
+Power Automate flows are created in **Draft** state. They require a human to:
+1. Create a Power BI connection in PPAC
+2. Link it to the connection reference
+3. Flows then auto-activate
+
+This is a one-time manual step per environment. The flow logic itself is fully imported.
+
+### pac auth Note
+
+Both CDX (source) and Zava PP (target) environments are in the same CDX tenant (`301759bc-5be1-40f1-8a44-822e286f5a9d`). pac auth index 2 (`karima@M365x05526665.onmicrosoft.com`) has access to both. The install.ps1 uses `--index 2` by default.

@@ -1,4 +1,4 @@
-﻿mcs.metadata:
+mcs.metadata:
   componentName: ExecuteDAX
 kind: TaskDialog
 inputs:
@@ -20,7 +20,7 @@ outputs:
   - propertyName: daxqueryresults
 action:
   kind: InvokeFlowTaskAction
-  flowId: b5d08619-c241-f111-bec7-6045bd024dba
+  flowId: 0d794073-5cae-4624-9449-c30f9ced7d0b
   connectionProperties:
     $kind: ConnectionProperties
     mode: Creator

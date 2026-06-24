@@ -1,4 +1,4 @@
-﻿mcs.metadata:
+mcs.metadata:
   componentName: RefreshDataset
 kind: TaskDialog
 inputs:
@@ -16,7 +16,7 @@ outputs:
   - propertyName: result
 action:
   kind: InvokeFlowTaskAction
-  flowId: 5e10968d-a142-f111-bec7-7ced8d3c7b0f
+  flowId: 4941a81c-ded7-4567-9630-afc9eb1f4403
   connectionProperties:
     $kind: ConnectionProperties
     mode: Creator
