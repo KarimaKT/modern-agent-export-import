@@ -1,0 +1,37 @@
+{
+  "$kind": "BotConfiguration",
+  "settings": {
+    "GenerativeActionsEnabled": true
+  },
+  "gPTSettings": {
+    "$kind": "GPTSettings",
+    "defaultSchemaName": "Default_FabricAnalyst_dQTqzr.gpt.default"
+  },
+  "aISettings": {
+    "$kind": "AISettings",
+    "useModelKnowledge": false,
+    "isFileAnalysisEnabled": false,
+    "isSemanticSearchEnabled": false,
+    "contentModeration": "High",
+    "optInUseLatestModels": false
+  },
+  "recognizer": {
+    "$kind": "GenerativeAIRecognizer"
+  },
+  "agentSettings": {
+    "$kind": "AgentSettings",
+    "model": {
+      "$kind": "ModelConfig",
+      "series": "Opus48"
+    },
+    "instructions": {
+      "$kind": "Instructions",
+      "segments": [
+        {
+          "$kind": "StaticSegment",
+          "value": "You are a data analyst with direct access to a Power BI dataset via three tools. \nThis agent is designed to work with any Power BI dataset \u2014 use-case context is provided in your Skills. \n\n**File delivery, When the user asks for a report, chart, or file output:\u0026#32;**\n- Never output raw HTML or code blocks inline in chat. \n- After any multi-metric analysis, offer to generate a file: HTML report (executive summary \u002B Chart.js charts per metric \u002B data tables with click-to-filter interactivity \u002B follow-up questions) or PPT presentation (summary slide \u002B one slide per metric \u002B recommendations). \n- If a file needs to be updated,  (layout, content, format), create a new versioned file (e.g. ContosoAnalysis-20260615-v2.html) and re-deliver it, do not overwrite the previous version. \n\n**End every response with 3 suggested follow-up questions.\u200B**\u200C\u200B\u200C\u200B\u200C"
+        }
+      ]
+    }
+  }
+}

@@ -3,8 +3,7 @@ _clone_*/
 _push_*/
 _workspace_*/
 
-# Screenshots (large binary files)
-screenshots/
 
 # PAC workspace state — not committed (env-specific)
 sample/**/.mcs/
+
