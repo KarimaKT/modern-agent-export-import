@@ -163,6 +163,8 @@ for pac CLI integration and `.mcs.yml` schema validation.
 | Connection wiring | One-time manual step per env per connector (normal platform behavior) |
 | Claude/Anthropic model | Target env must have the same model series enabled |
 | Botcomponent schemaname > 100 chars | `install.ps1` warns; rename the tool in source env |
+| **Custom connectors with inline code** | **Not tested.** Custom connectors that use inline C# code (Azure Functions-backed) may not deploy reliably — this is a known Power Platform platform instability independent of this toolkit. Standard Microsoft connectors (Power BI, Office 365, etc.) are not affected. |
+| **McpTool (MCP server tools)** | **Not tested.** The tool definition (server URL, tool list) transfers, but the MCP server itself must be running and reachable in the target environment. Local MCP servers with dev tunnels require re-wiring. |
 
 ---
 

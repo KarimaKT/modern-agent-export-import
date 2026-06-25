@@ -10,6 +10,10 @@ _skill_build/
 _test_*/
 _pb_*
 
+# path2-vscode export output (agent YAML, configs, skill assets — not for source control)
+sample/
+skills-with-assets/
+
 # PAC workspace state (env-specific, not for source control)
 **/.mcs/
 

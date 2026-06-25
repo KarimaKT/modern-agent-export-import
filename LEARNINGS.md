@@ -235,3 +235,33 @@ SUMMARY of knowledge source behavior:
   File knowledge (PDF/doc, type 14) ✅ Works through solution import  
   Skills with assets (ZIP+Python)   ❌ bic:bundle= broken — needs inline fix
 
+
+## 11. Connector types tested — and what was NOT tested
+
+### What we tested
+
+All ConnectorTool instances in our test agent use **standard Microsoft-published connectors**
+(specifically `shared_powerbi` — the Power BI connector). These connectors have:
+- No custom code
+- No Azure Functions backend
+- `connectorId` is a stable platform reference string (e.g. `/providers/Microsoft.PowerApps/apis/shared_powerbi`)
+- Export/import just carries the `connectorId` — the connection reference record is created empty and wired manually
+
+This is the simplest and most stable connector scenario. It worked correctly.
+
+### What was NOT tested — Custom connectors with inline code
+
+**Custom connectors** (connectors built by the agent author with custom API definitions) come in two forms:
+
+1. **No inline code** — connector definition only (OpenAPI spec, auth). These travel in the solution ZIP as a customapi record. *Likely works, not tested.*
+
+2. **With inline code** — connector definition + embedded C# script actions, backed by Azure Functions. These require an Azure Function to be deployed to Azure alongside the connector definition. This deployment is known to be unreliable on import — the Azure Function may not be provisioned correctly, leaving the connector defined but non-functional.
+
+**This is a platform-level limitation, not specific to this toolkit.** The instability exists with any Power Platform solution that contains custom connectors with inline code. Mitigation: prefer custom connectors without inline code, or use flows/plugins for the code layer.
+
+### What was NOT tested — McpTool (MCP server tools)
+
+McpTool definitions carry the MCP server URL and registered tool list. The tool definition exports and imports correctly. However:
+- The MCP server itself must be running and reachable at the same URL in the target environment
+- Local MCP servers (e.g. running on localhost with a dev tunnel URL) have env-specific tunnel URLs that break after import
+- Mitigation: use a stable hosted URL for MCP servers, or re-wire the McpTool URL after import
