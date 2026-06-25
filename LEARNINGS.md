@@ -230,6 +230,7 @@ Do NOT add:
 - **SchemaName > 100 chars**: If any botcomponent schemaname exceeds 100 characters (can happen with long tool display names or long connection reference logical names), pac push fails with `StringLengthTooLong`. Fix: rename the tool to a shorter display name in the source agent.
 - **botdefinition.json from wrong env**: pac push requires the workspace to be cloned from the TARGET environment. Using a workspace cloned from the source env causes `UnknownDialogBase` errors from pac 2.8.1 parsing the source's botdefinition.json. Fix: always clone a fresh empty workspace from target before pushing.
 - **Bot must pre-exist**: pac push fails with "Entity 'bot' Does Not Exist" if the bot wasn't pre-created. Fix: create bot via `POST /api/data/v9.2/bots` first.
+- **pac push crashes with ArgumentOutOfRangeException but still deploys**: Both pac pushes in the develop/ path (steps 4 and 6) produce "non-recoverable error" crash output with `System.ArgumentOutOfRangeException`, but exit with code 0 and the content IS successfully deployed to Dataverse. This is a pac CLI internal bug (confirmed June 2026). The deploy scripts treat exit code 0 as success — verified by querying DV after each push. Do not fail on this crash output.
 
 ---
 

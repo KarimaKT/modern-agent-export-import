@@ -223,11 +223,15 @@ if ($skillsWithAssets.Count -gt 0) {
     Write-Host "  The agent will not work correctly until this step is complete." -ForegroundColor Yellow
     Write-Host ""
 
+    # Write skill ZIPs to a stable location the user can access after the script completes.
+    # When -BundleZip was used, the bundle was extracted to a temp dir that gets cleaned up.
+    # Use the same directory as the original bundle ZIP (or current dir if -BundleDir was used).
+    $skillZipOutputDir = if ($BundleZip) { Split-Path (Resolve-Path $BundleZip).Path -Parent } else { $BundleDir }
     $reuploadZips = @()
     foreach ($skillEntry in $skillsWithAssets) {
         $skillName     = if ($skillEntry.PSObject.Properties["skill"]) { $skillEntry.skill } else { $skillEntry }
         $skillAssetDir = Join-Path $BundleDir "skills-with-assets" $skillName
-        $skillZipPath  = Join-Path $BundleDir "skills-with-assets" "$skillName.zip"
+        $skillZipPath  = Join-Path $skillZipOutputDir "$skillName-skill.zip"
 
         if (Test-Path $skillAssetDir) {
             if (Test-Path $skillZipPath) { Remove-Item $skillZipPath -Force }
