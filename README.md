@@ -15,7 +15,7 @@ the standard `pac copilot clone/push` workflow does not fully support:
 
 | Gap | Without this toolkit |
 |-----|---------------------|
-| Skills uploaded as ZIP files (Python/binary assets) | Break silently after solution import — appear in UI but assets are missing |
+| Skills uploaded as ZIP files (Python/binary assets) | Break silently after solution import — appear in UI but assets are missing. *Note: markdown-only InlineAgentSkills work correctly; this gap affects only skills bundled with Python scripts or binary files.* |
 | `bot.configuration` (instructions, model) | Not written by `pac push`; edits made in the UI diverge from YAML |
 | Flow tool GUIDs (`workflowId`, `flowId`) | Source-env GUIDs embedded in YAML — pac push fails with "Workflow Does Not Exist" |
 | No documentation on these gaps | Developers hit silent failures with no clear cause |
@@ -143,9 +143,10 @@ Python assets are missing. Our scripts detect and re-upload these blobs.
 
 ## What pac solution import handles (verified test results)
 
-> **Common misconception**: Many developers believe skills don't work via solution import.
-> This is wrong. **InlineAgentSkills work perfectly**. The specific gap is skills-with-assets
-> (ZIP+Python bundles) — and our `install.ps1` handles that automatically.
+> **Note on skills and solution import**: The commonly reported issue — "skills don't work via 
+> solution import" — is specific to skills uploaded as ZIP files (with Python/binary assets). 
+> **InlineAgentSkills (markdown-based knowledge) import correctly** with no extra steps.
+> The ZIP-skill gap is handled automatically by `install.ps1`.
 
 | Test Case | Result |
 |-----------|--------|
@@ -246,5 +247,7 @@ Tested end-to-end with **Fabric Analyst** agent:
 - Connection references: Power BI, Fabric REST API
 
 All 10 test cases passed. See table above.
+
+
 
 

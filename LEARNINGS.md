@@ -224,3 +224,4 @@ SUMMARY of knowledge source behavior:
   URL knowledge (type 16)          ✅ Works through solution import
   File knowledge (PDF/doc, type 14) ✅ Works through solution import  
   Skills with assets (ZIP+Python)   ❌ bic:bundle= broken — needs inline fix
+
