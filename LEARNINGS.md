@@ -274,10 +274,96 @@ URLs break on import — use a stable hosted URL or re-wire after import.
 
 ### pac CLI alpha — native Modern agent support
 
-The pac CLI team is adding native `cliagent-1.0.0` support. Alpha builds are at:
-https://dev.azure.com/msazure/One/_artifacts/feed/CAP_ISVExp_Tools_Daily
+The pac CLI team has been reported to be adding native `cliagent-1.0.0` support. Alpha
+builds are at: https://dev.azure.com/msazure/One/_artifacts/feed/CAP_ISVExp_Tools_Daily
+(requires authentication — not publicly inspectable).
 
-If the alpha handles `bot.configuration`, flow GUIDs, and skills correctly, it will
-supersede this toolkit for Path 2 (VS Code developer workflow). Test the alpha before
-committing to either approach. Path 1 (solution ZIP distribution) may remain useful
-regardless, as solution packaging is a separate concern from push/pull.
+Based on the public NuGet changelog (versions 1.35 through 2.8.1), **no releases have
+shipped fixes for bot.configuration, flow GUIDs, skills-with-assets, or solution
+membership** for cliagent agents. Issue #1259 (extract-template missing configuration,
+open 10+ months) and issue #1306 (create ignores kickStartTemplate JSON, open) confirm
+these gaps remain unresolved in stable. Test the alpha if you have access before
+committing to this toolkit for the VS Code path.
+
+---
+
+## 12. Official pac CLI gap assessment (pac 2.8.1, June 2026)
+
+This is the definitive comparison between pac CLI stable and what this toolkit adds.
+All findings are from: the official pac.doc.json, live testing, and open GitHub issues.
+
+### pac copilot clone — what it captures
+
+pac copilot clone correctly captures everything in the agent's YAML component graph:
+- Dialog YAML (topics, actions, connection references, translations, knowledge, workflows)
+- Tool definitions (ConnectorTool, McpTool, WorkflowTool, InlineAgentSkill)
+
+**It does NOT capture:**
+- `bot.configuration` (authentication, channels, security, instructions — no parameter exists)
+- Binary skill assets (bic:bundle= references — not in YAML graph)
+
+### pac copilot push — what it does
+
+Push is a round-trip of exactly what clone pulled. It does not resolve or remap flow GUIDs,
+does not write bot.configuration, and cannot restore skill binaries.
+
+### pac copilot pack — confirmed broken for cliagent workspaces
+
+`pac copilot pack` was designed to package a workspace into a solution ZIP. **It does not
+support the full cliagent-1.0.0 workspace format.** Running it on a cloned workspace produces:
+
+```
+Error: Workspace is not a valid agent workspace.
+Unsupported file: connectionreferences.mcs.yml
+Unsupported directory: actions/
+Unsupported directory: knowledge/
+Unsupported directory: translations/
+Unsupported directory: workflows/
+```
+
+This means pac copilot pack **cannot be used for cliagent-1.0.0 agents** as of 2.8.1.
+Our path1-solution/export.ps1 (using pac solution export with surgical AddSolutionComponent)
+is the only working pack path for these agents.
+
+### pac copilot pull — crashes with ArgumentOutOfRangeException
+
+`pac copilot pull` on a cliagent-1.0.0 workspace crashes with an unhandled exception
+(System.ArgumentOutOfRangeException). The crash appears to be an internal parsing failure
+when encountering cliagent-specific YAML structures (actions/, knowledge/, translations/).
+Filed as undefined behavior — no public issue tracked yet.
+
+### pac copilot extract-template + create — ignores configuration (issue #1259, #1306)
+
+`pac copilot extract-template` generates a `kickStartTemplate-1.0.0.json` that contains
+agent description, instructions, settings, and knowledge sources. However, `pac copilot create`
+silently ignores this JSON file — creating an empty agent with no configuration.
+Open since August 2025, no Microsoft response.
+
+### Open bugs that affect cliagent ALM (pac 2.8.1)
+
+| Issue | Bug | Status |
+|---|---|---|
+| #1259 | extract-template/create ignores configuration (instructions, knowledge, settings) | Open 10+ months |
+| #1306 | create ignores kickStartTemplate-1.0.0.json entirely | Open |
+| #1253 | solution import fails for agents with file attachments | Open |
+| #1282 | publish crashes on non-English Dataverse locale | Open |
+| #1307 | publish race condition — always fails on first attempt | Open |
+| #1372 | All copilot commands crash on Turkish/Azerbaijani locale | Open |
+| #1393 | pac copilot mcp --run breaks MCP stdio protocol (stdout corruption) | Open |
+
+### VS Code extension
+
+The Power Platform Tools extension (microsoft-IsvExpTools.powerplatform-vscode) has **no
+dedicated Copilot Studio agent tooling**. Its GUI features are for Power Pages and PCF controls.
+For agents, it is purely a pac CLI host — its only value is dropping `pac` into the terminal
+and providing YAML schema hints. Current: v2.0.145.
+
+### Net assessment: where this toolkit adds value
+
+| Our gap | pac 2.8.1 status | Toolkit value |
+|---|---|---|
+| bot.configuration export/import | Not captured anywhere in pac | ✅ Real gap closed |
+| Flow GUID remap (Path 2) | Not handled — push re-embeds source GUIDs | ✅ Real gap closed |
+| Skills-with-assets repair | No pac mechanism | ✅ Real gap closed |
+| Solution packaging (Path 1) | pac copilot pack crashes on cliagent workspaces | ✅ Real gap closed |
+| Default Solution membership | No pac mechanism for surgical component add | ✅ Real gap closed |
