@@ -1,14 +1,15 @@
-# Temp workspaces created by install scripts
+# Temp workspaces and build artifacts
 _workspace_*/
 _clone_*/
-_push_*/
-
-# Skill build artifacts
-_skill_build/
-
-# Inspect/debug folders
 _inspect_*/
+_push_*/
+_skill_build/
+_test_*/
+_pb_*/
 
-# PAC workspace state — env-specific, not for source control
-sample/**/.mcs/
-path2-vscode/sample/**/.mcs/
+# PAC workspace state (env-specific, not for source control)
+**/.mcs/
+
+# OS
+.DS_Store
+Thumbs.db

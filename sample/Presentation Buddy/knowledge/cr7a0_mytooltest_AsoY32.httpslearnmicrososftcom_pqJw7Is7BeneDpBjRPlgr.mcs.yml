@@ -1,7 +1,0 @@
-mcs.metadata:
-  componentName: https://learn.micrososft.com
-  description: "This knowledge source searches microsoft documentation and guidance on the web "
-kind: KnowledgeSourceConfiguration
-source:
-  kind: WebsiteKnowledgeSource
-  siteUrl: https://micrososft.com

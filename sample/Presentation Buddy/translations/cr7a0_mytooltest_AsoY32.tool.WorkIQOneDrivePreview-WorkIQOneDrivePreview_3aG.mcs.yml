@@ -1,8 +1,0 @@
-mcs.metadata:
-  componentName: Work IQ OneDrive (Preview) — Work IQ OneDrive (Preview)
-  description: "Work IQ MCP server for Microsoft OneDrive operations. This feature is in preview and is part of the Work IQ tools, providing shared work intelligence and actions for agents. Availability and capabilities are subject to change. Learn more: https://aka.ms/AboutWorkIQ"
-kind: McpTool
-authMode: Invoker
-connectionReference: cr7a0_mytooltest_AsoY32.cr.shared_workiqonedrive.5d7703daf1eb4f26a723ee6d4aac1f8e
-connectorId: /providers/Microsoft.PowerApps/apis/shared_workiqonedrive
-operationId: mcp_OneDriveRemoteServer

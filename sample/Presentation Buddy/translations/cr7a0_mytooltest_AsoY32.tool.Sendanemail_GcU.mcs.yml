@@ -1,8 +1,0 @@
-mcs.metadata:
-  componentName: Send an email
-  description: This operation sends an email message.
-kind: ConnectorTool
-authMode: Invoker
-connectionReference: cr7a0_mytooltest_AsoY32.cr.shared_office365
-connectorId: /providers/Microsoft.PowerApps/apis/shared_office365
-operationId: SendEmailV2

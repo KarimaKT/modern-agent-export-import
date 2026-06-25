@@ -1,9 +1,0 @@
-﻿connectionReferences:
-  - connectionReferenceLogicalName: cr7a0_agent2_SkNOeq.shared_commondataserviceforapps.shared-commondataser-2438a3d8-f3a6-4b8b-b8bc-d0c78d1b285a
-    connectorId: /providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps
-  - connectionReferenceLogicalName: cr7a0_mytooltest_AsoY32.cr.shared_office365
-    connectorId: /providers/Microsoft.PowerApps/apis/shared_office365
-  - connectionReferenceLogicalName: cr7a0_mytooltest_AsoY32.cr.shared_workiqonedrive.5d7703daf1eb4f26a723ee6d4aac1f8e
-    connectorId: /providers/Microsoft.PowerApps/apis/shared_workiqonedrive
-  - connectionReferenceLogicalName: cr7a0_prescriptionAssistant.shared_commondataserviceforapps.shared-commondataser-a7e2692d-36c4-44a8-b264-b26869e058aa
-    connectorId: /providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps
