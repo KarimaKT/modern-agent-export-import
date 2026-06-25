@@ -102,22 +102,29 @@ $dv = @{ Authorization="Bearer $token"; "OData-MaxVersion"="4.0"; "OData-Version
 OK "Token acquired"
 
 # ── Step 1: Validate Modern agent ─────────────────────────────────────────────
-Step "Step 1 — Validate Modern Copilot Studio agent (cliagent-1.0.0)"
+Step "Step 1 — Validate Modern Copilot Studio agent (cliagent-* template)"
 $bot = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots($BotId)?`$select=botid,name,schemaname,template,configuration" -Headers $dv
 $cfg = $bot.configuration | ConvertFrom-Json
 
-# Hard requirement: cliagent-1.0.0 template.
-if ($bot.template -ne "cliagent-1.0.0") {
-    Write-Error "template='$($bot.template)' — expected 'cliagent-1.0.0'. This toolkit is for cliagent-1.0.0 agents only."
+# Hard requirement: cliagent-* template prefix.
+# Classic agents use default-2.x.x. We check prefix not exact version so future
+# cliagent-1.0.1 etc. are accepted without updating the script.
+if ($bot.template -notlike "cliagent-*") {
+    Write-Error "template='$($bot.template)' — expected 'cliagent-*'. Classic agents (default-2.x.x) use a different workflow; this toolkit is for cliagent-* agents only."
+}
+
+# Corroborate: cliagent agents have agentSettings in bot.configuration; classic agents do not.
+if (-not $cfg.agentSettings) {
+    WARN "bot.configuration has no 'agentSettings' block — this agent may be Classic despite the template value. Export will proceed but verify after import."
 }
 
 # Informational: recognizer type. Both CLICopilotRecognizer (NGO) and GenerativeAIRecognizer
-# (CGO) are valid in cliagent-1.0.0 containers. Export behavior is identical for both.
+# (CGO) are valid in cliagent containers. Export behavior is identical for both.
 $recognizerKind = $cfg.recognizer.'$kind'
 if ($recognizerKind -eq "CLICopilotRecognizer") {
-    INFO "Recognizer: CLICopilotRecognizer (Modern / NGO)"
+    INFO "Recognizer: CLICopilotRecognizer (NGO)"
 } elseif ($recognizerKind -eq "GenerativeAIRecognizer") {
-    INFO "Recognizer: GenerativeAIRecognizer (CGO in cliagent container) — export works the same"
+    INFO "Recognizer: GenerativeAIRecognizer (CGO in cliagent container)"
 } else {
     WARN "Recognizer: $recognizerKind (unrecognized — export will proceed)"
 }
@@ -129,7 +136,7 @@ if ($customTopics.Count -gt 0) {
     WARN "This toolkit is designed for instructions-based agents. Topics will clone, but test carefully."
 }
 
-OK "$($bot.name) ($($bot.schemaname)) — template: cliagent-1.0.0 ✓"
+OK "$($bot.name) ($($bot.schemaname)) — template: $($bot.template) ✓"
 
 # ── Step 2: pac copilot clone → YAML ─────────────────────────────────────────
 Step "Step 2 — pac copilot clone (all YAML: tools, skills, flows, connection refs)"

@@ -5,27 +5,49 @@
 
 ---
 
-## 1. Identifying a cliagent-1.0.0 Agent
+## 1. Identifying a Modern (cliagent-*) Agent
 
-The **template** is the definitive structural identifier:
+### The template field
 
-| Property | cliagent-1.0.0 | Classic |
-|---|---|---|
-| `template` (on bot DV record) | `cliagent-1.0.0` | `default-2.1.0` |
-| `recognizer.$kind` (in bot.configuration) | `CLICopilotRecognizer` **or** `GenerativeAIRecognizer` | `GenerativeAIRecognizer` |
-| Custom topics | None | Has custom topics |
+The `template` field on the Dataverse `bot` record is the definitive structural identifier.
+It is set at agent creation and is not user-editable. Known values:
 
-**Important nuance on recognizer type:**
-Both `CLICopilotRecognizer` (NGO/Modern orchestration) and `GenerativeAIRecognizer` (CGO) can appear
-in `cliagent-1.0.0` agents. The recognizer governs *how the agent orchestrates* — not *how it exports*.
-The ALM behaviors and export/import mechanics are identical for both. Do NOT reject a `cliagent-1.0.0`
-agent solely because it uses `GenerativeAIRecognizer`.
+| template value | Architecture |
+|---|---|
+| `cliagent-1.0.0` | Modern — instructions-based, tools, no topics |
+| `default-2.1.0` | Classic — topics-based conversation flow (current) |
+| `default-2.0.1` | Classic — older version |
 
-The only hard guards to apply before export:
-1. `template == cliagent-1.0.0` — if this is false, the agent is Classic; this toolkit is not designed for it.
-2. No custom topics (type-2 botcomponents) — if topics exist, it's a Classic agent in a new container; test carefully.
+**Use a prefix check (`cliagent-*`), not an exact match.** Future versions (`cliagent-1.0.1` etc.)
+will have the same architecture and ALM behavior. An exact match on `cliagent-1.0.0` would
+reject valid future agents unnecessarily.
 
-Checking only the recognizer is insufficient and will produce false negatives.
+### Secondary discriminator: agentSettings in bot.configuration
+
+cliagent agents always have an `agentSettings` block in `bot.configuration`.
+Classic agents have `gPTSettings` but not `agentSettings`. Use this as a corroborating check:
+
+```
+cliagent-*  → bot.configuration.agentSettings EXISTS    (instructions, model, etc.)
+default-*   → bot.configuration.gPTSettings EXISTS, no agentSettings
+```
+
+### Recognizer type does NOT discriminate architecture
+
+Both `CLICopilotRecognizer` (NGO) and `GenerativeAIRecognizer` (CGO) appear in cliagent
+agents. The recognizer governs orchestration style, not the ALM format. Export/import
+mechanics are identical for both. Do NOT reject an agent based on recognizer type.
+
+### Custom topics as a soft warning
+
+If a cliagent-* agent has type-2 botcomponents (custom topics), it may be in transition
+or misconfigured. Export will work but verify behavior after import.
+
+### The reliable check sequence
+
+1. `template -like "cliagent-*"` — hard gate
+2. `bot.configuration.agentSettings` exists — corroboration
+3. No type-2 botcomponents — soft warning only
 
 ---
 
