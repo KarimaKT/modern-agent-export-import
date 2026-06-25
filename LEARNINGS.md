@@ -70,21 +70,26 @@ $body = @{ configuration = $configJson } | ConvertTo-Json -Depth 1  # correctly 
 ```
 NOT `'{"configuration":' + $json + '}'` — that sends an object literal, not a string value, and gets rejected with OData error.
 
-### Gap 3 — Skills with assets (ZIP-uploaded Python/binary skills)
+### GAP 3 — Skills with assets (ZIP-uploaded Python/binary skills)
 
 When a skill is uploaded as a ZIP containing binary files (Python scripts, images, etc.):
-- DV creates a type-9 botcomponent with `data: kind: InlineAgentSkill\ncontent: <!-- bic:bundle=<hash> -->`
-- DV creates type-14 botcomponents as children with the actual binary content in the `filedata` field
-- The `bic:bundle=` token is an environment-specific reference to a binary blob
+- DV creates a type-9 botcomponent with data: kind: InlineAgentSkill\ncontent: <!-- bic:bundle=<hash> -->
+- DV creates type-14 botcomponents as children with the actual binary content
+- The ic:bundle= token references a binary blob in Copilot Studio server-side storage
 
-pac clone captures the `bic:bundle=` token in the translation YAML — but the blob itself lives outside the standard component schema. pac push on target creates the type-9 skill record with the stale bundle reference, but has no blob to point to. The skill appears but its assets are broken.
+**This blob is NOT accessible via standard Dataverse OData API.**
+The bundle is created by a Copilot Studio server-side process during ZIP upload —
+likely through a non-public CS-specific endpoint, not through /api/data/v9.2.
 
-**Fix in install.ps1:**
-1. Detect skills with `bic:bundle=` in their data
-2. Download the type-14 file components' binary content from source via DV API
-3. Rebuild a ZIP from those files
-4. Delete the broken skill on target
-5. Re-upload the ZIP via DV API — this creates a fresh bundle in the target env
+**TESTED:** Uploading type-14 file components via the 3-step DV file column protocol
+(InitializeFileBlocksUpload → UploadBlock → CommitFileBlocksUpload) successfully stores
+the binary bytes but does NOT trigger bundle creation. The type-9 skill's ic:bundle=
+reference remains broken. The bundle token is opaque and environment-specific.
+
+**Known workaround (manual only):** After solution import, re-upload the skill ZIP
+manually through the Copilot Studio UI → Skills → Upload a skill.
+
+**No automated fix is currently possible** without access to the undocumented CS upload endpoint.
 
 ---
 
@@ -173,3 +178,4 @@ All Modern agent content is plain text and fully editable in VS Code:
 | Agent built and maintained in VS Code | **Path 2** — YAML is authoritative; skip the UI |
 
 In both paths, skills with assets require the post-import fix (detect `bic:bundle=`, rebuild ZIP, re-upload). This is automated in our install scripts.
+

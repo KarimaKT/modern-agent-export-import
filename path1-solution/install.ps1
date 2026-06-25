@@ -137,75 +137,39 @@ INFO "  - Skills with assets (file records imported, bundle needs Step 2)"
 if ($LASTEXITCODE -ne 0) { Write-Error "pac solution import failed. See output above." }
 OK "Solution import complete"
 
-# ── Step 2: Fix skills with assets (bic:bundle= re-upload) ───────────────────
-if ($manifest.skillsWithAssets.Count -gt 0) {
-    Step "Step 2 — Fix skills with assets (re-upload binary bundles)"
-    INFO "pac solution import restores the skill record and file components,"
-    INFO "but cannot reconstitute the binary bundle blob (bic:bundle=...) that the"
-    INFO "skill references at runtime. This step rebuilds and re-uploads each ZIP skill."
-
-    # Find the imported bot
-    $bot = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots?`$filter=schemaname eq '$($manifest.agentSchema)'&`$select=botid,name" -Headers $dv).value[0]
-    if (-not $bot) { Write-Error "Bot '$($manifest.agentSchema)' not found after import" }
-    $botId = $bot.botid
-    INFO "Bot: $($bot.name) ($botId)"
-
-    foreach ($skillEntry in $manifest.skillsWithAssets) {
-        $skillName    = $skillEntry.skill
-        $skillAssets  = Join-Path $BundleDir "skills-with-assets\$skillName"
-        if (-not (Test-Path $skillAssets)) {
-            WARN "Skill assets folder not found: $skillAssets — skipping '$skillName'"
-            continue
-        }
-
-        INFO ""
-        INFO "Processing skill: $skillName"
-
-        # Find broken skill on target (has bic:bundle= in data)
-        $brokenSkill = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotid_value eq '$botId' and name eq '$skillName'&`$select=botcomponentid,data" -Headers $dv).value |
-            Where-Object { $_.data -like "*bic:bundle=*" }
-
-        if (-not $brokenSkill) {
-            WARN "Broken skill '$skillName' not found in target DV — may have been fixed already"
-            continue
-        }
-
-        # Delete broken skill and its stale type-14 children
-        $brokenChildren = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotcomponentid_value eq '$($brokenSkill[0].botcomponentid)'&`$select=botcomponentid" -Headers $dv).value
-        foreach ($child in $brokenChildren) {
-            try { Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($child.botcomponentid))" -Method DELETE -Headers $dv } catch {}
-        }
-        try { Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($brokenSkill[0].botcomponentid))" -Method DELETE -Headers $dv } catch {}
-        INFO "Deleted broken skill record + $($brokenChildren.Count) stale file component(s)"
-
-        # Rebuild ZIP from exported files
-        $tmpZip = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "$skillName-$(Get-Date -Format 'yyyyMMddHHmmss').zip")
-        Compress-Archive -Path (Join-Path $skillAssets "*") -DestinationPath $tmpZip -Force
-        INFO "Rebuilt ZIP: $tmpZip ($([Math]::Round((Get-Item $tmpZip).Length/1KB))KB)"
-
-        # Re-upload via DV API
-        # Read SKILL.md for name/description
-        $skillMd   = Get-Content (Join-Path $skillAssets "SKILL.md") -Raw -ErrorAction SilentlyContinue
-        $skillDisplayName = if ($skillMd -match "(?m)^name:\s*(.+)") { $Matches[1].Trim() } else { $skillName }
-        $skillDesc = if ($skillMd -match "(?m)^description:\s*(.+)") { $Matches[1].Trim() } else { "" }
-
-        # Upload as multipart form — DV skill upload endpoint
-        $zipBytes  = [System.IO.File]::ReadAllBytes($tmpZip)
-        $zipBase64 = [Convert]::ToBase64String($zipBytes)
-
-        # POST the new skill botcomponent with filedata
-        $newSkill = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents" -Method POST -Headers $dv -Body (@{
-            name          = $skillDisplayName
-            description   = $skillDesc
-            componenttype = 9
-            "parentbotid@odata.bind" = "/bots($botId)"
-            filedata      = $zipBase64
-            filedata_name = "$skillName.zip"
-        } | ConvertTo-Json -Depth 3)
-
-        Remove-Item $tmpZip -Force
-        OK "Skill '$skillName' re-uploaded → $($newSkill.botcomponentid)"
+# ── Step 2: Document skills with assets requiring manual re-upload ─────────────
+# IMPORTANT: Skills uploaded as ZIP files (containing Python/binary assets) have a
+# bic:bundle= reference that is created by Copilot Studio's server-side processing.
+# This bundle blob is NOT accessible via the Dataverse OData API, and cannot be
+# recreated programmatically. After solution import:
+#   - The skill RECORD exists (type-9 botcomponent)
+#   - The file COMPONENTS exist (type-14 botcomponents with binary content)
+#   - But the bic:bundle= reference is broken — assets are unreachable at runtime
+#
+# FIX: Manually re-upload each skill ZIP through the Copilot Studio UI:
+#   1. Open the agent in Copilot Studio
+#   2. Skills section → click X to remove the broken skill
+#   3. Add skill → Upload a skill → upload the ZIP from skills-with-assets/
+#
+if (.skillsWithAssets.Count -gt 0) {
+    Step "Step 2 — Skills with assets require manual re-upload"
+    Write-Host ""
+    Write-Host "  The following skills use binary assets (Python scripts, etc.):" -ForegroundColor Yellow
+    foreach ( in .skillsWithAssets) {
+        Write-Host "    • " -ForegroundColor Cyan
+        Write-Host "      Files: "
+         = Join-Path  "skills-with-assets\"
+        Write-Host "      Source: "
     }
+    Write-Host ""
+    Write-Host "  After import, for each skill above:" -ForegroundColor Yellow
+    Write-Host "    1. Open the agent in Copilot Studio"
+    Write-Host "    2. In Skills, click X to remove the broken skill entry"
+    Write-Host "    3. Add skill → Upload a skill → upload the ZIP from the source path above"
+    Write-Host "    4. Save the agent"
+    Write-Host ""
+    WARN "Skills with assets CANNOT be automatically fixed — manual UI upload required"
+    WARN "This is a known Copilot Studio limitation (no public API for bundle creation)"
 } else {
     Step "Step 2 — No skills with assets (skipping)"
     OK "No binary skill bundles to fix"
@@ -238,3 +202,4 @@ if ($manifest.connectorsRequired.Count -gt 0) {
     Write-Host "    2. Default Solution → Connection References → edit each → link to connection"
     Write-Host "    3. Flows activate automatically"
 }
+

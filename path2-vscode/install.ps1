@@ -277,38 +277,39 @@ if ($wfDirs.Count -eq 0) {
     if ($LASTEXITCODE -ne 0) { WARN "Second push exit $LASTEXITCODE" } else { OK "Second push succeeded — tools linked to flows" }
 }
 
-# ── Step 7: Fix skills with assets ───────────────────────────────────────────
-if (Test-Path $SkillsDir) {
-    $skillFolders = Get-ChildItem $SkillsDir -Directory -ErrorAction SilentlyContinue
-    if ($skillFolders.Count -gt 0) {
-        Step "Step 7 — Fix skills with assets (re-upload binary bundles)"
-        foreach ($sf in $skillFolders) {
-            $skillName = $sf.Name
-            $skillMd   = Get-Content (Join-Path $sf.FullName "SKILL.md") -Raw -ErrorAction SilentlyContinue
-            $dispName  = if ($skillMd -match "(?m)^name:\s*(.+)") { $Matches[1].Trim() } else { $skillName }
-            $desc      = if ($skillMd -match "(?m)^description:\s*(.+)") { $Matches[1].Trim() } else { "" }
-
-            # Delete broken skill (bic:bundle=) if present from pac push
-            $broken = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotid_value eq '$newBotId' and name eq '$dispName'&`$select=botcomponentid,data" -Headers $dv).value |
-                Where-Object { $_.data -like "*bic:bundle=*" }
-            foreach ($b in $broken) {
-                $bChildren = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotcomponentid_value eq '$($b.botcomponentid)'&`$select=botcomponentid" -Headers $dv).value
-                $bChildren | ForEach-Object { try { Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($_.botcomponentid))" -Method DELETE -Headers $dv } catch {} }
-                try { Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($b.botcomponentid))" -Method DELETE -Headers $dv } catch {}
-            }
-
-            # Rebuild ZIP and re-upload
-            $tmpZip = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "$skillName-$(Get-Date -Format 'yyyyMMddHHmmss').zip")
-            Compress-Archive -Path (Join-Path $sf.FullName "*") -DestinationPath $tmpZip -Force
-            $newSkill = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents" -Method POST -Headers $dv -Body (@{
-                name = $dispName; description = $desc; componenttype = 9
-                "parentbotid@odata.bind" = "/bots($newBotId)"
-                filedata = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($tmpZip))
-                filedata_name = "$skillName.zip"
-            } | ConvertTo-Json -Depth 3)
-            Remove-Item $tmpZip -Force
-            OK "  Skill '$skillName' re-uploaded → $($newSkill.botcomponentid)"
+# ── Step 7: Skills with assets — manual re-upload required ───────────────────
+# pac copilot push creates the type-9 skill record with the bic:bundle= reference
+# from the source environment. That bundle does not exist in the target environment.
+# pac push CANNOT recreate the bundle — it is created by Copilot Studio server-side
+# processing during ZIP upload, via a non-public endpoint.
+#
+# The type-14 file component records (SKILL.md, Python scripts etc.) are in the
+# skills-with-assets/ folder and can be read, but uploading them individually via
+# the DV OData API does NOT trigger bundle creation.
+#
+# Fix: manually re-upload each skill ZIP through the Copilot Studio UI after deploy.
+#
+if (Test-Path ) {
+     = Get-ChildItem  -Directory -ErrorAction SilentlyContinue
+    if (.Count -gt 0) {
+        Step "Step 7 — Skills with assets require manual re-upload"
+        Write-Host ""
+        Write-Host "  The following skills have binary assets:" -ForegroundColor Yellow
+        foreach ( in ) {
+            Write-Host "    • " -ForegroundColor Cyan
+            Write-Host "      Files: _inspect_pb, _inspect_pb2, _inspect_zip, _inspect_zip2, _skill_build, _workspace_20260624151243, .vscode, path1-solution, path2-vscode, sample, screenshots, scripts, skills, solution, .gitignore, CONTRIBUTING.md, LEARNINGS.md, LICENSE, README.md"
+            Write-Host "      Rebuild ZIP from: "
         }
+        Write-Host ""
+        Write-Host "  After deployment, for each skill above:" -ForegroundColor Yellow
+        Write-Host "    1. Build a ZIP from the skill folder above"
+        Write-Host "    2. Open the agent in Copilot Studio"
+        Write-Host "    3. In Skills, remove the broken skill entry (bic:bundle= is broken)"
+        Write-Host "    4. Add skill → Upload a skill → upload the rebuilt ZIP"
+        Write-Host "    5. Save the agent"
+        Write-Host ""
+        WARN "Skills with assets require manual re-upload — no automated fix available"
+        WARN "This is a known Copilot Studio limitation (no public API for bundle creation)"
     }
 }
 
@@ -330,3 +331,4 @@ Write-Host "    [x] $(($strippedWorkflow.Count + $strippedFlow.Count)) flow(s) c
 Write-Host ""
 Write-Host "  MANUAL: Wire connections in PPAC to activate flows" -ForegroundColor Yellow
 Write-Host "  Workspace (debug): $WorkspaceDir"
+
