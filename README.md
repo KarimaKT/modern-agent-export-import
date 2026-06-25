@@ -1,6 +1,6 @@
 # Modern Copilot Studio Agent — Export / Import Toolkit
 
-> **pac CLI 2.8.1–2.9.1-alpha gap (verified June 2026):** `pac copilot pack` crashes on cliagent-1.0.0 workspaces. `pac copilot pull` crashes. `pac copilot extract-template` + `create` silently ignores agent configuration (open issue #1259, 10+ months). The alpha feed (CAP_ISVExp_Tools_Daily, 2.9.1-alpha) ships only `pac admin query` and an identity client update — no Modern agent improvements. This toolkit fills all confirmed gaps. See [LEARNINGS.md §12](LEARNINGS.md) for the full verified comparison.
+> **pac CLI gap (June 2026):** `pac copilot pack` crashes on cliagent-1.0.0 workspaces. `pac copilot pull` crashes. `pac copilot extract-template` + `create` silently ignores agent configuration (open issue #1259, 10+ months). Native cliagent ALM support is on the pac CLI roadmap — monitor release notes at https://aka.ms/PowerPlatformCLI. Until it ships, this toolkit fills the gaps. See [LEARNINGS.md §12](LEARNINGS.md) for the full comparison.
 
 PowerShell scripts to export, distribute, and import **Modern Copilot Studio agents**
 (`cliagent-1.0.0`) across environments — filling specific tested gaps in the current stable pac CLI.

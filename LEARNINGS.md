@@ -272,28 +272,18 @@ McpTool definitions export and import correctly. The MCP server itself must be r
 and reachable at the same URL in the target environment. Local servers with dev-tunnel
 URLs break on import — use a stable hosted URL or re-wire after import.
 
-### pac CLI alpha feed — verified June 25, 2026
+### pac CLI roadmap
 
-The CAP_ISVExp_Tools_Daily feed at https://dev.azure.com/msazure/One/_artifacts/feed/CAP_ISVExp_Tools_Daily
-contains `Microsoft.PowerApps.CLI.Tool 2.9.1-alpha-26062500` (built June 24, 2026).
-
-**This is the standard pac CLI pre-release pipeline — not a separate Modern agent tool.**
-
-Release notes for 2.9.1-alpha:
-- `pac admin query` (new Resource Query command)
-- Microsoft.Identity.Client updated to 4.85.0
-
-**No mention of cliagent-1.0.0, Modern agents, bot.configuration, or copilot ALM improvements.**
-The alpha confirms there is no imminent platform fix coming for the gaps this toolkit addresses.
-The feed appears to be a standard pre-release promotion channel for the regular pac CLI,
-not a dedicated modern-agent build. Any native cliagent support from the pac team is
-planned/future work, not something available today (June 2026).
+Native cliagent-1.0.0 ALM support is on the pac CLI roadmap. When it ships, it may close
+some or all of the gaps this toolkit addresses. Monitor pac CLI release notes at
+https://aka.ms/PowerPlatformCLI and test new releases against the gaps in section 12
+before deciding whether this toolkit is still needed for your workflow.
 
 ---
 
-## 12. Official pac CLI gap assessment (pac 2.8.1–2.9.1-alpha, June 2026)
+## 12. Official pac CLI gap assessment (pac 2.8.1, June 2026)
 
-This is the definitive comparison between pac CLI stable and what this toolkit adds.
+This is a comparison between pac CLI stable and what this toolkit adds.
 All findings are from: the official pac.doc.json, live testing, and open GitHub issues.
 
 ### pac copilot clone — what it captures
