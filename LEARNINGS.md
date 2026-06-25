@@ -200,3 +200,27 @@ What is NOT restored: Python execution via Code Interpreter (requires bundle)
 
 For production agents where Python execution is required: manual ZIP re-upload via UI.
 For sample distribution: automated fix is sufficient — instructions work correctly.
+
+
+## 10. File knowledge uploads (PDFs, docs) — WORKS through solution import
+
+TESTED: Uploaded test-knowledge.pdf to CleanBuildAgent via CS UI, added to solution,
+exported, imported to target env. Result: PDF binary (549 bytes) fully preserved.
+
+How it works:
+- CS UI calls POST/PUT to powervamg.us-il301.gateway.prod.island.powerapps.com/api/botmanagement/v1/
+  (BotManagement gateway — not standard DV OData)
+- Creates type-14 botcomponent with filedata binary stored in DV (no Azure bundle reference)
+- schemaname pattern: {agentSchema}.file.{filename_sanitized}_{hash}
+- filedata binary IS included in solution ZIP under botcomponents/{schema}/filedata/
+- Solution import correctly restores the binary via type-14 botcomponent
+
+WHY it works (vs skills with assets which break):
+- File knowledge stores the binary DIRECTLY in DV filedata (standard file column)
+- Skills with assets store a bic:bundle= TOKEN referencing Azure blob storage
+- Solution export captures DV filedata but NOT external Azure blob references
+
+SUMMARY of knowledge source behavior:
+  URL knowledge (type 16)          ✅ Works through solution import
+  File knowledge (PDF/doc, type 14) ✅ Works through solution import  
+  Skills with assets (ZIP+Python)   ❌ bic:bundle= broken — needs inline fix
