@@ -104,25 +104,75 @@ NOT `'{"configuration":' + $json + '}'` — that sends an object literal, not a 
 
 ### GAP 3 — Skills with assets (ZIP-uploaded Python/binary skills)
 
-When a skill is uploaded as a ZIP containing binary files (Python scripts, images, etc.):
-- DV creates a type-9 botcomponent with data: kind: InlineAgentSkill\ncontent: <!-- bic:bundle=<hash> -->
-- DV creates type-14 botcomponents as children with the actual binary content
-- The ic:bundle= token references a binary blob in Copilot Studio server-side storage
+#### How CS stores skills-with-assets — the two-layer design
 
-**This blob is NOT accessible via standard Dataverse OData API.**
-The bundle is created by a Copilot Studio server-side process during ZIP upload —
-likely through a non-public CS-specific endpoint, not through /api/data/v9.2.
+When a skill ZIP is uploaded through the Copilot Studio UI, CS creates two separate things:
 
-**TESTED:** Uploading type-14 file components via the 3-step DV file column protocol
-(InitializeFileBlocksUpload → UploadBlock → CommitFileBlocksUpload) successfully stores
-the binary bytes but does NOT trigger bundle creation. The type-9 skill's ic:bundle=
-reference remains broken. The bundle token is opaque and environment-specific.
+**TYPE-9 botcomponent** — the skill record the agent references:
 
-**Known workaround (manual only):** After solution import, re-upload the skill ZIP
-manually through the Copilot Studio UI → Skills → Upload a skill.
+```
+name: "retail-sales-report"          ← display name (survives import)
+data: "kind: InlineAgentSkill
+       content: <!-- bic:bundle=AgentSchema.file.skillname_hash -->"
+```
 
-**No automated fix is currently possible** without access to the undocumented CS upload endpoint.
+The `content` field contains **only a bundle pointer token — no instructions, no name**.
+The model reads instructions at runtime by resolving the bundle token against Azure blob storage.
 
+**TYPE-14 botcomponents** — file asset children of the type-9:
+
+```
+SKILL.md         ← the actual instructions: name, description, full markdown
+retail_report.py ← the Python script
+```
+
+SKILL.md is the authoritative source of skill instructions. The Azure bundle blob is a
+CS-server-side copy created during ZIP upload through a non-public endpoint.
+
+#### What breaks on import — the "unnamed skills" problem
+
+After any naive solution import or pac push into a new environment:
+- The type-9 record imports with its `content: <!-- bic:bundle=... -->` intact
+- The type-14 children (SKILL.md, .py) also import correctly
+- BUT the bundle token references Azure blob storage that **does not exist in the target environment**
+
+When CS resolves the bundle token at runtime it gets a 404. The skill shows in the CS UI
+with its display name but **no description, no instructions** — the model cannot use it.
+This is the "unnamed skills" problem: the DV name field survives, the content does not.
+
+**pac copilot clone has the same problem.** The cloned YAML carries the same broken pointer:
+
+```yaml
+mcs.metadata:
+  componentName: retail-sales-report          # name preserved in YAML metadata
+  description: Generate a retail sales report... # description preserved
+kind: InlineAgentSkill
+content: <!-- bic:bundle=Default_FabricAnalyst_dQTqzr.file.retailsalesreportzip_cL7-s -->
+```
+
+mcs.metadata carries name and description correctly. But `content` is the broken pointer.
+pac push to a target environment produces an empty, unusable skill.
+
+#### Our fix — a deliberate override, not a restore
+
+We cannot recreate the bundle blob (requires the undocumented CS server-side upload endpoint).
+Instead, we read SKILL.md from the imported type-14 child and PATCH the type-9 data field:
+
+```
+BEFORE: data = "kind: InlineAgentSkill\ncontent: <!-- bic:bundle=... -->"
+AFTER:  data = "kind: InlineAgentSkill\ncontent: |-\n  ---\n  name: ...\n  instructions..."
+```
+
+This is an **override, not a restore**. The skill changes from bundle-backed to inline.
+
+| | After naive import | After our fix | After manual re-upload via CS UI |
+|--|--|--|--|
+| Model reads instructions | Empty — skill useless | Full SKILL.md content | Full content |
+| Python/code execution | Broken | No Code Interpreter | Restored |
+| Skill in CS UI | Present but empty | Works as inline skill | Works with code |
+
+The DV API PATCH is the only automated path available. pac CLI has no command for this.
+Required: `PATCH /api/data/v9.2/botcomponents({id})` with `{ data: <inline yaml> }`
 ---
 
 ## 4. What pac solution import gets right
