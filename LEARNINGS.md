@@ -230,7 +230,14 @@ Do NOT add:
 - **SchemaName > 100 chars**: If any botcomponent schemaname exceeds 100 characters (can happen with long tool display names or long connection reference logical names), pac push fails with `StringLengthTooLong`. Fix: rename the tool to a shorter display name in the source agent.
 - **botdefinition.json from wrong env**: pac push requires the workspace to be cloned from the TARGET environment. Using a workspace cloned from the source env causes `UnknownDialogBase` errors from pac 2.8.1 parsing the source's botdefinition.json. Fix: always clone a fresh empty workspace from target before pushing.
 - **Bot must pre-exist**: pac push fails with "Entity 'bot' Does Not Exist" if the bot wasn't pre-created. Fix: create bot via `POST /api/data/v9.2/bots` first.
-- **pac push crashes with ArgumentOutOfRangeException but still deploys**: Both pac pushes in the develop/ path (steps 4 and 6) produce "non-recoverable error" crash output with `System.ArgumentOutOfRangeException`, but exit with code 0 and the content IS successfully deployed to Dataverse. This is a pac CLI internal bug (confirmed June 2026). The deploy scripts treat exit code 0 as success — verified by querying DV after each push. Do not fail on this crash output.
+- **pac push crashes after completing deployment** (critical): Both pac pushes in the develop/ path crash with `System.ArgumentOutOfRangeException: Unknown type 'Microsoft.Agents.ObjectModel.UnknownDialogBase'` in `ReadWorkspaceDefinitionAsync`. The crash happens in the **post-push status read**, not during the write. The Dataverse writes complete before the crash occurs, and exit code is 0. This means:
+  1. The push DID deploy content — verified by DV API queries after each push
+  2. pac CLI does NOT confirm what it deployed (the validation phase crashed)
+  3. There is no pac-provided confirmation that the deploy was complete or correct
+  
+  **This is why develop/ path uses DV API verification after the push**, not pac output, to confirm success. The develop/ path is fundamentally dependent on the DV API queries to know what actually landed. If you use pac push without the DV verification steps, you cannot know whether the deploy was complete.
+  
+  This crash is a pac CLI bug: pac 2.8.1 does not understand `cliagent-*` YAML in its post-push reader, despite having deployed it. This is the core reason this toolkit exists — pac does not reliably support cliagent-* agents.
 
 ---
 

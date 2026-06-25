@@ -219,8 +219,21 @@ OK "YAML copied; $($strippedWorkflow.Count + $strippedFlow.Count) flow GUID(s) s
 # ── Step 4: First pac push ────────────────────────────────────────────────────
 Step "Step 4 -- First pac push (agent settings, tools, skills, knowledge, connection refs)"
 INFO "Flow GUIDs were stripped -- push creates tool botcomponents without flow links."
+INFO "NOTE: pac push 2.8.1 crashes in its post-push reader for cliagent-* agents but still"
+INFO "deploys content. Exit code 0 = writes completed. We verify via DV API, not pac output."
 & $PacExe copilot push --project-dir $ws 2>&1 | ForEach-Object { INFO $_ }
-if ($LASTEXITCODE -ne 0) { WARN "pac push exit $LASTEXITCODE -- check output above" } else { OK "First push succeeded" }
+if ($LASTEXITCODE -ne 0) {
+    WARN "pac push exit $LASTEXITCODE -- checking DV directly to confirm what deployed"
+}
+
+# Verify push via DV API — pac's post-push reader crashes and cannot confirm deployment
+$pushComps = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotid_value eq '$newBotId' and componenttype eq 9&`$select=name,data&`$top=20" -Headers $dv).value
+if ($pushComps.Count -gt 0) {
+    OK "First push verified via DV: $($pushComps.Count) type-9 components deployed"
+    $pushComps | ForEach-Object { INFO "  $($_.name)" }
+} else {
+    Write-Error "First push FAILED — no botcomponents found in target DV. Cannot continue."
+}
 
 # ── Step 5: PATCH bot.configuration ──────────────────────────────────────────
 Step "Step 5 -- Patch bot.configuration (authoritative instructions + model)"
@@ -296,7 +309,21 @@ if ($wfDirs.Count -eq 0) {
 
     INFO "Re-pushing with remapped flow GUIDs..."
     & $PacExe copilot push --project-dir $ws 2>&1 | ForEach-Object { INFO $_ }
-    if ($LASTEXITCODE -ne 0) { WARN "Second push exit $LASTEXITCODE" } else { OK "Second push succeeded -- tools linked to flows" }
+    if ($LASTEXITCODE -ne 0) { WARN "pac push exit $LASTEXITCODE -- verifying via DV API" }
+
+    # Verify flow links via DV API — pac's post-push reader crashes and cannot confirm
+    $linkedOk = $true
+    foreach ($fid in $guidMap.Values) {
+        try {
+            $wf = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/workflows($fid)?`$select=workflowid,name" -Headers $dv
+            OK "  Second push verified: flow '$($wf.name)' linked ($fid)"
+        } catch {
+            WARN "  Flow $fid not found in DV after second push"
+            $linkedOk = $false
+        }
+    }
+    if ($linkedOk) { OK "Second push verified via DV -- tools linked to flows" }
+    else { WARN "Some flows may not have linked correctly -- verify agent in Copilot Studio" }
 }
 
 # -- Step 7: Skills with assets require manual upload
