@@ -74,7 +74,7 @@ This toolkit closes all four gaps with tested, scripted solutions.
 | Property | Modern (`cliagent-1.0.0`) | Classic (`default-2.1.0`) |
 |----------|--------------------------|--------------------------|
 | Template | `cliagent-1.0.0` | `default-2.1.0` |
-| Recognizer | `CLICopilotRecognizer` | `GenerativeAIRecognizer` |
+| Recognizer | `CLICopilotRecognizer` (NGO) or `GenerativeAIRecognizer` (CGO) | `GenerativeAIRecognizer` |
 | Topics | None — orchestration via instructions + tools | Topics-based conversation flow |
 | Instructions | `bot.configuration` field in Dataverse (authoritative) | In `settings.mcs.yml` |
 | Flow tools | WorkflowTool (newer) + TaskDialog (older) | TaskDialog only |
@@ -184,18 +184,30 @@ LEARNINGS.md    ← all tested findings with evidence (no assumptions)
 
 ## Tested on
 
-The **pac solution import component matrix** (path 1 core behavior) was verified end-to-end
-against a real Modern Copilot Studio agent (`cliagent-1.0.0`) with:
-- Tools: ConnectorTool, WorkflowTool (with Power Automate flows)
-- Skills: InlineAgentSkill, skill-with-assets (ZIP + Python script)
-- Knowledge: URL knowledge source, uploaded PDF
-- Evaluation test cases
-- Connection references
+End-to-end tested June 2026 against a real `cliagent-1.0.0` agent exported from one
+environment and imported into a fresh environment via the full pipeline:
 
-All component types in the matrix above were individually confirmed. See `LEARNINGS.md`
-for full test details.
+```
+export.ps1 → Fabric-Analyst-bundle.zip → (delete agent in target) → install.ps1 -BundleZip
+```
 
-> **Note on end-to-end scripts:** The `export.ps1 → install.ps1 -BundleZip` pipeline and
-> the path 2 VS Code cycle have been written and syntax-validated, but have not been run
-> as a complete end-to-end automated test. The individual operations they perform have been
-> tested manually and confirmed correct. Contributions with full end-to-end test runs welcome.
+Agent under test had:
+- Tools: 3× ConnectorTool (Power BI), 2× TaskDialog (Agent Flows)
+- Skills: 1× InlineAgentSkill, 1× skill-with-assets (ZIP + Python script)
+- Knowledge: (none in this test — PDF knowledge tested separately, confirmed working)
+- Evaluation test cases: 10 records
+- Connection references: 1 (Power BI — empty after import, as expected)
+
+### Verified after import
+
+| Component | Result |
+|-----------|--------|
+| `bot.configuration` (instructions + model) | ✅ Restored from ZIP |
+| ConnectorTools (3× Power BI) | ✅ Present |
+| TaskDialog flows — flow records exist in target with correct GUIDs | ✅ Verified via DV API |
+| InlineAgentSkill | ✅ Present |
+| skill-with-assets (retail-sales-report) | ✅ Repaired to InlineAgentSkill — instructions work |
+| Evaluation test cases (10 records) | ✅ Present |
+| Connection reference (Power BI) | ✅ Created empty — wire manually in Power Automate |
+
+See `LEARNINGS.md` for all tested technical findings.

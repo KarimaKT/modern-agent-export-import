@@ -5,17 +5,27 @@
 
 ---
 
-## 1. Identifying a Modern Copilot Studio Agent
+## 1. Identifying a cliagent-1.0.0 Agent
 
-A Modern agent has ALL of the following — check all three before assuming anything:
+The **template** is the definitive structural identifier:
 
-| Property | Modern | Classic |
+| Property | cliagent-1.0.0 | Classic |
 |---|---|---|
 | `template` (on bot DV record) | `cliagent-1.0.0` | `default-2.1.0` |
-| `recognizer.$kind` (in bot.configuration) | `CLICopilotRecognizer` | `GenerativeAIRecognizer` |
+| `recognizer.$kind` (in bot.configuration) | `CLICopilotRecognizer` **or** `GenerativeAIRecognizer` | `GenerativeAIRecognizer` |
 | Custom topics | None | Has custom topics |
 
-Checking only the template is insufficient — some agents in transition may have the template set but retain classic behavior.
+**Important nuance on recognizer type:**
+Both `CLICopilotRecognizer` (NGO/Modern orchestration) and `GenerativeAIRecognizer` (CGO) can appear
+in `cliagent-1.0.0` agents. The recognizer governs *how the agent orchestrates* — not *how it exports*.
+The ALM behaviors and export/import mechanics are identical for both. Do NOT reject a `cliagent-1.0.0`
+agent solely because it uses `GenerativeAIRecognizer`.
+
+The only hard guards to apply before export:
+1. `template == cliagent-1.0.0` — if this is false, the agent is Classic; this toolkit is not designed for it.
+2. No custom topics (type-2 botcomponents) — if topics exist, it's a Classic agent in a new container; test carefully.
+
+Checking only the recognizer is insufficient and will produce false negatives.
 
 ---
 
