@@ -1,9 +1,14 @@
-# Temp workspaces used by install.ps1
+# Temp workspaces created by install scripts
+_workspace_*/
 _clone_*/
 _push_*/
-_workspace_*/
-_inspect_*/
+
+# Skill build artifacts
 _skill_build/
 
-# PAC workspace state — not committed (env-specific)
+# Inspect/debug folders
+_inspect_*/
+
+# PAC workspace state — env-specific, not for source control
 sample/**/.mcs/
+path2-vscode/sample/**/.mcs/

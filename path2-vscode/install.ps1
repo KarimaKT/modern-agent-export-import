@@ -1,392 +1,332 @@
 <#
 .SYNOPSIS
-    Deploy a Modern Copilot Studio agent to a target environment via pac copilot push.
+    Deploy a Modern Copilot Studio agent from a VS Code clone to any target environment.
 
 .DESCRIPTION
-    pac copilot push alone cannot fully deploy a Modern agent. This script fills five gaps:
+    Takes the output of path2-vscode/export.ps1 (sample/ folder + agent-config.json +
+    skills-with-assets/) and fully deploys it to a target environment.
 
-    GAP 1 — bot pre-creation required
-        pac push errors with "Entity 'bot' Does Not Exist" if the agent doesn't exist yet.
-        This script creates it first via Dataverse API (POST /bots), then clones the empty
-        bot to get a valid pac workspace, then copies the source YAML in.
+    This script requires NO prior knowledge of the agent — everything is read from
+    sample/ and agent-config.json. The target environment just needs to be accessible.
 
-    GAP 2 — bot.configuration not written by pac push
-        Instructions edited in the Copilot Studio UI live in bot.configuration in DV, not
-        in settings.mcs.yml. This script PATCHes bot.configuration from agent-config.json
-        after push to apply the authoritative instructions and model.
+    WHAT THIS SCRIPT DOES (5 steps, all automated)
+    ───────────────────────────────────────────────
 
-    GAP 3 — Flow GUIDs are env-specific
-        WorkflowTool (translations/*.mcs.yml) embeds workflowId: <source-guid>.
-        TaskDialog/InvokeFlowTaskAction (actions/*.mcs.yml) embeds flowId: <source-guid>.
-        These GUIDs don't exist in the target. This script:
-          1. Strips GUIDs → first pac push (creates tools without flow links)
-          2. Creates flows in target via POST /workflows (new GUIDs)
-          3. Patches new GUIDs back into YAML
-          4. Second pac push (links tools to flows)
+    STEP 1 — Create agent in target Dataverse
+      pac copilot push requires the bot to pre-exist in target.
+      Error without this: "Entity 'bot' With Id = ... Does Not Exist"
+      Fix: POST /api/data/v9.2/bots with template=cliagent-1.0.0
 
-    GAP 4 — Connection references need manual wiring
-        pac push creates connection reference records but doesn't attach connections.
-        Flows stay in Draft until a human wires each connection in PPAC (one-time per env).
+    STEP 2 — Clone empty agent to get a valid workspace
+      pac copilot push requires a workspace that was cloned from the TARGET environment.
+      Using a workspace from the source env causes pac to crash parsing botdefinition.json.
+      Fix: pac copilot clone the new empty bot → get a fresh workspace for target env.
 
-    WHAT PAC PUSH HANDLES AUTOMATICALLY:
-        ConnectorTool, McpTool, InlineAgentSkill, ConnectedAgentTool, URL knowledge,
-        connection reference stubs — all from YAML.
+    STEP 3 — Copy source YAML into workspace; strip env-specific flow GUIDs
+      Copy all YAML from sample/<AgentName>/ into the workspace.
+      Strip flowId/workflowId from tool YAMLs — those GUIDs don't exist in target yet.
+        WorkflowTool:          translations/*.mcs.yml → workflowId: <source-guid>
+        TaskDialog (AgentFlow): actions/*.mcs.yml      → flowId: <source-guid>
+      First push (step 4) creates tool botcomponents without flow links.
 
-.PARAMETER PacExe
-    Path to pac.exe. Auto-detected from PATH or NuGet cache if omitted.
+    STEP 4 — First pac copilot push
+      Deploys: agent settings, tool/skill botcomponents, URL knowledge, connection refs.
+      Does NOT deploy: bot.configuration (step 5) or flows (step 6).
 
-.PARAMETER TargetOrgUrl
-    Target Dataverse environment URL, e.g. https://myorg.crm.dynamics.com
+    STEP 5 — PATCH bot.configuration
+      pac push writes settings.mcs.yml to bot.configuration, but agent-config.json
+      (exported from DV) may have newer instructions edited in the Copilot Studio UI.
+      Fix: PATCH bot.configuration from agent-config.json after push.
+      IMPORTANT: bot.configuration is stored as a STRING in Dataverse, not a JSON column.
+      The body must be: @{ configuration = $configJson } | ConvertTo-Json -Depth 1
+      This correctly string-encodes the JSON. Do NOT use string concatenation.
 
-.PARAMETER AgentName
-    Display name of the agent. Must match the sample/ subfolder name.
+    STEP 6 — Create flows + remap GUIDs + second push
+      Create all flows in target via POST /api/data/v9.2/workflows using workflow.json.
+      Get the new GUIDs, patch them back into the tool YAML files.
+      Second push links each tool to its flow.
 
-.PARAMETER AgentSchemaName
-    Dataverse schema name of the agent (from settings.mcs.yml → schemaName).
+    STEP 7 — Fix skills with assets
+      If skills-with-assets/ folder exists, re-upload each skill's ZIP.
+      Same problem as solution path: bic:bundle= is env-specific, must be fresh-uploaded.
+
+    WHAT IS NOT AUTOMATED (manual, normal platform behavior)
+    ─────────────────────────────────────────────────────────
+      Connection wiring: flows stay in Draft until a human creates connections in PPAC
+      and links them to the connection references. This is standard Power Platform ALM.
+
+    PREREQUISITES
+    ─────────────
+    pac CLI:  https://aka.ms/PowerPlatformCLI
+    az CLI:   https://aka.ms/installazurecliwindows
+    pac auth: pac auth create --environment https://yourorg.crm.dynamics.com
+    az login: az login (with Dataverse write access to target env)
 
 .PARAMETER SampleDir
-    Path to the sample/<AgentName> directory containing YAML files.
-    Default: auto-detected from repo root relative to script location.
+    Path to the sample/ folder from export (contains <AgentName>/ subfolder).
+    Defaults to ./sample relative to script location.
 
-.PARAMETER ConfigPath
-    Path to agent-config.json. Default: sample/agent-config.json relative to repo root.
+.PARAMETER AgentName
+    Display name of the agent (must match the subfolder name under SampleDir).
+
+.PARAMETER AgentSchemaName
+    Dataverse schema name (from sample/<AgentName>/settings.mcs.yml → schemaName).
+
+.PARAMETER TargetOrgUrl
+    Dataverse org URL for the target environment.
 
 .PARAMETER AuthIndex
-    pac auth profile index (default: 1).
+    pac auth index for the target environment.
+
+.PARAMETER PacExe
+    Path to pac.exe. Auto-detected from PATH or NuGet cache if not specified.
 
 .EXAMPLE
-    .\path2-vscode\install.ps1 `
-      -TargetOrgUrl    "https://myorg.crm.dynamics.com" `
-      -AgentName       "Fabric Analyst" `
-      -AgentSchemaName "cr7a0_FabricAnalyst_dQTqzr"
-
-.EXAMPLE
-    .\path2-vscode\install.ps1 `
-      -TargetOrgUrl    "https://myorg.crm.dynamics.com" `
-      -AgentName       "Fabric Analyst" `
-      -AgentSchemaName "cr7a0_FabricAnalyst_dQTqzr" `
-      -AuthIndex       2
+    .\install.ps1 `
+      -AgentName       "My Agent" `
+      -AgentSchemaName "cr7a0_MyAgent_xxxxx" `
+      -TargetOrgUrl    "https://myorg.crm.dynamics.com"
 #>
 param(
-    [string]$PacExe          = "",
-    [Parameter(Mandatory)][string]$TargetOrgUrl,
-    [Parameter(Mandatory)][string]$AgentName,
-    [Parameter(Mandatory)][string]$AgentSchemaName,
-    [string]$SampleDir       = "",
-    [string]$ConfigPath      = "",
-    [int]   $AuthIndex       = 1
+    [string] $SampleDir      = "",
+    [Parameter(Mandatory)][string] $AgentName,
+    [Parameter(Mandatory)][string] $AgentSchemaName,
+    [Parameter(Mandatory)][string] $TargetOrgUrl,
+    [int]    $AuthIndex       = 1,
+    [string] $PacExe          = ""
 )
 
 $ErrorActionPreference = "Stop"
+$ScriptDir   = Split-Path $MyInvocation.MyCommand.Path -Parent
+$RepoRoot    = Split-Path $ScriptDir -Parent
+$SampleDir   = if ($SampleDir) { $SampleDir } else { Join-Path $RepoRoot "sample" }
+$AgentDir    = Join-Path $SampleDir $AgentName
+$ConfigPath  = Join-Path $SampleDir "agent-config.json"
+$SkillsDir   = Join-Path $RepoRoot "skills-with-assets"
+$OrgNoTrail  = $TargetOrgUrl.TrimEnd("/")
+$WorkspaceDir = Join-Path $RepoRoot "_workspace_$(Get-Date -Format 'yyyyMMddHHmmss')"
 
-function Step  { Write-Host "`n$args" -ForegroundColor Cyan }
-function OK    { Write-Host "  OK  $args" -ForegroundColor Green }
-function INFO  { Write-Host "      $args" -ForegroundColor Gray }
-function WARN  { Write-Host "  !   $args" -ForegroundColor Yellow }
-function ERR   { Write-Host "  ERR $args" -ForegroundColor Red; exit 1 }
+if (-not (Test-Path $AgentDir)) { Write-Error "Agent folder not found: $AgentDir" }
 
-# ── Locate pac.exe ─────────────────────────────────────────────────────────────
 if (-not $PacExe) {
     $PacExe = (Get-Command "pac" -ErrorAction SilentlyContinue)?.Source
     if (-not $PacExe) {
         $PacExe = Get-ChildItem "$env:USERPROFILE\.nuget\packages\microsoft.powerapps.cli" -Filter "pac.exe" -Recurse -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
     }
-    if (-not $PacExe) { ERR "pac CLI not found. Install: https://aka.ms/PowerPlatformCLI" }
+    if (-not $PacExe) { Write-Error "pac CLI not found. Install: https://aka.ms/PowerPlatformCLI" }
 }
 
-$ScriptDir    = Split-Path $MyInvocation.MyCommand.Path -Parent
-$RepoRoot     = Split-Path $ScriptDir -Parent
-if (-not $SampleDir)  { $SampleDir  = Join-Path $RepoRoot "sample\$AgentName" }
-if (-not $ConfigPath) { $ConfigPath = Join-Path $RepoRoot "sample\agent-config.json" }
-$OrgNoTrail   = $TargetOrgUrl.TrimEnd("/")
-$WorkspaceDir = Join-Path $RepoRoot "_workspace_$(Get-Date -Format 'yyyyMMddHHmmss')"
-$guidMap      = @{}
+function Step([string]$msg) { Write-Host "`n>>> $msg" -ForegroundColor Cyan }
+function OK([string]$msg)   { Write-Host "    OK  $msg" -ForegroundColor Green }
+function WARN([string]$msg) { Write-Host "    !   $msg" -ForegroundColor Yellow }
+function INFO([string]$msg) { Write-Host "        $msg" -ForegroundColor DarkGray }
 
 Write-Host ""
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Modern Agent Install — VS Code Path"       -ForegroundColor Cyan
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Target     : $OrgNoTrail"
-Write-Host "  Agent      : $AgentName ($AgentSchemaName)"
-Write-Host "  Sample dir : $SampleDir"
-Write-Host "  Workspace  : $WorkspaceDir"
-
-if (-not (Test-Path $SampleDir)) { ERR "Sample directory not found: $SampleDir. Run export.ps1 first." }
+Write-Host "╔══════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║  Modern Agent Install — VS Code Path     ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "  Target : $OrgNoTrail"
+Write-Host "  Agent  : $AgentName ($AgentSchemaName)"
+Write-Host ""
 
 # ── Acquire DV token ──────────────────────────────────────────────────────────
-Step "Acquiring Dataverse bearer token..."
-
-$tokenJson = az account get-access-token --resource $OrgNoTrail 2>&1
-if ($LASTEXITCODE -ne 0) { ERR "az account get-access-token failed. Run: az login" }
-$token = ($tokenJson | ConvertFrom-Json).accessToken
-$dv = @{
-    Authorization      = "Bearer $token"
-    "OData-MaxVersion" = "4.0"
-    "OData-Version"    = "4.0"
-    Accept             = "application/json"
-    "Content-Type"     = "application/json"
-    Prefer             = "return=representation"
-}
+Step "Acquiring Dataverse token..."
+$token = (az account get-access-token --resource $OrgNoTrail | ConvertFrom-Json).accessToken
+$dv = @{ Authorization="Bearer $token"; "OData-MaxVersion"="4.0"; "OData-Version"="4.0"; Accept="application/json"; "Content-Type"="application/json"; Prefer="return=representation" }
 OK "Token acquired"
 
+& $PacExe auth select --index $AuthIndex | Out-Null
+
 # ── Step 1: Create agent in target Dataverse ──────────────────────────────────
-Step "[1/7] Creating agent in target Dataverse..."
-
+Step "Step 1 — Create agent in target Dataverse (pre-requisite for pac push)"
 $newBotId = $null
-try {
-    $ex = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots?`$filter=schemaname eq '$AgentSchemaName'&`$select=botid,name" -Headers $dv
-    if ($ex.value.Count -gt 0) {
-        $newBotId = $ex.value[0].botid
-        WARN "Agent already exists: $newBotId — skipping creation, will push into existing record"
-    }
-} catch { WARN "Could not check for existing agent: $($_.Exception.Message)" }
-
-if (-not $newBotId) {
+$existing = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots?`$filter=schemaname eq '$AgentSchemaName'&`$select=botid,name" -Headers $dv).value
+if ($existing.Count -gt 0) {
+    $newBotId = $existing[0].botid
+    WARN "Agent already exists: $newBotId — skipping creation"
+} else {
     $b = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots" -Method POST -Headers $dv -Body (@{
-        name               = $AgentName
-        schemaname         = $AgentSchemaName
-        template           = "cliagent-1.0.0"
-        language           = 1033
-        authenticationmode = 1
+        name = $AgentName; schemaname = $AgentSchemaName; template = "cliagent-1.0.0"; language = 1033; authenticationmode = 1
     } | ConvertTo-Json)
     $newBotId = $b.botid
-    OK "Agent created: $newBotId"
+    OK "Bot created: $newBotId"
 }
 
-# ── Step 2: Clone empty agent → get valid pac workspace ───────────────────────
-Step "[2/7] Cloning empty agent to create pac workspace..."
-
-& $PacExe auth select --index $AuthIndex | Out-Null
+# ── Step 2: Clone empty agent → valid workspace ───────────────────────────────
+Step "Step 2 — Clone empty agent from target env (get valid workspace)"
+INFO "Workspace must be cloned from TARGET env — source env workspace causes pac crashes"
 New-Item -ItemType Directory -Force -Path $WorkspaceDir | Out-Null
 & $PacExe copilot clone --environment $OrgNoTrail --bot $newBotId --display-name $AgentName --output-dir $WorkspaceDir 2>&1 | ForEach-Object { INFO $_ }
-if ($LASTEXITCODE -ne 0) { ERR "pac copilot clone failed (exit $LASTEXITCODE)" }
+if ($LASTEXITCODE -ne 0) { Write-Error "pac copilot clone failed" }
 $ws = Join-Path $WorkspaceDir $AgentName
 OK "Workspace: $ws"
 
-# ── Step 3: Copy source YAML into workspace + strip flow GUIDs ────────────────
-Step "[3/7] Copying source YAML into workspace, stripping env-specific flow GUIDs..."
+# ── Step 3: Copy source YAML; strip env-specific flow GUIDs ──────────────────
+Step "Step 3 — Copy source YAML; strip flow GUIDs from tool files"
+INFO "Flow GUIDs (flowId/workflowId) in source YAML are env-specific — don't exist in target."
+INFO "Strip them before push; remap after flows are created in Step 6."
 
-# Top-level files
 foreach ($f in @("agent.mcs.yml","settings.mcs.yml","connectionreferences.mcs.yml","icon.png")) {
-    $src = Join-Path $SampleDir $f
+    $src = Join-Path $AgentDir $f
     if (Test-Path $src) { Copy-Item $src "$ws\$f" -Force }
 }
-
-# Subdirectories
 foreach ($d in @("knowledge","translations","workflows","actions")) {
-    $src = Join-Path $SampleDir $d
+    $src = Join-Path $AgentDir $d
     if (Test-Path $src) {
         New-Item -ItemType Directory -Force -Path "$ws\$d" | Out-Null
         Copy-Item "$src\*" "$ws\$d\" -Recurse -Force
     }
 }
 
-# Strip WorkflowTool GUIDs (translations/*.mcs.yml: workflowId: <guid>)
-$strippedWorkflowIds = @{}
+# Strip WorkflowTool workflowId (translations/*.mcs.yml)
+$strippedWorkflow = @{}
 Get-ChildItem "$ws\translations" -Filter "*.mcs.yml" -ErrorAction SilentlyContinue | ForEach-Object {
-    $yml = Get-Content $_.FullName -Raw
-    if ($yml -match "kind: WorkflowTool") {
-        if ($yml -match "(?m)^workflowId: ([a-f0-9\-]{36})") {
-            $strippedWorkflowIds[$_.Name] = $Matches[1]
-            INFO "WorkflowTool '$($_.BaseName)' — stripped workflowId $($Matches[1])"
-        }
-        $fixed = $yml -replace "(?m)^workflowId: [a-f0-9\-]+\r?\n", ""
-        Set-Content $_.FullName -Value $fixed -Encoding UTF8 -NoNewline
+    $c = Get-Content $_.FullName -Raw
+    if ($c -match "kind: WorkflowTool" -and $c -match "(?m)^workflowId: ([a-f0-9\-]{36})") {
+        $strippedWorkflow[$_.Name] = $Matches[1]
+        Set-Content $_.FullName -Value ($c -replace "(?m)^workflowId: [a-f0-9\-]+\r?\n","") -Encoding UTF8 -NoNewline
+        INFO "  WorkflowTool '$($_.BaseName)' — stripped workflowId $($Matches[1])"
     }
 }
 
-# Strip TaskDialog/AgentFlow GUIDs (actions/*.mcs.yml: "  flowId: <guid>")
-$strippedFlowIds = @{}
+# Strip TaskDialog flowId (actions/*.mcs.yml)
+$strippedFlow = @{}
 Get-ChildItem "$ws\actions" -Filter "*.mcs.yml" -ErrorAction SilentlyContinue | ForEach-Object {
-    $yml = Get-Content $_.FullName -Raw
-    if ($yml -match "kind: InvokeFlowTaskAction") {
-        if ($yml -match "(?m)^  flowId: ([a-f0-9\-]{36})") {
-            $strippedFlowIds[$_.Name] = $Matches[1]
-            INFO "AgentFlow '$($_.BaseName)' — stripped flowId $($Matches[1])"
-        }
-        $fixed = $yml -replace "(?m)^  flowId: [a-f0-9\-]+\r?\n", ""
-        Set-Content $_.FullName -Value $fixed -Encoding UTF8 -NoNewline
+    $c = Get-Content $_.FullName -Raw
+    if ($c -match "kind: InvokeFlowTaskAction" -and $c -match "(?m)^  flowId: ([a-f0-9\-]{36})") {
+        $strippedFlow[$_.Name] = $Matches[1]
+        Set-Content $_.FullName -Value ($c -replace "(?m)^  flowId: [a-f0-9\-]+\r?\n","") -Encoding UTF8 -NoNewline
+        INFO "  AgentFlow '$($_.BaseName)' — stripped flowId $($Matches[1])"
     }
 }
-
-$totalStripped = $strippedWorkflowIds.Count + $strippedFlowIds.Count
-OK "Stripped $totalStripped flow GUID(s) ($($strippedWorkflowIds.Count) WorkflowTool, $($strippedFlowIds.Count) AgentFlow)"
+OK "YAML copied; $($strippedWorkflow.Count + $strippedFlow.Count) GUIDs stripped"
 
 # ── Step 4: First pac push ────────────────────────────────────────────────────
-Step "[4/7] First pac push (creates agent config, tools, knowledge, connection refs)..."
-INFO "Flow tools are created without GUID links — that is intentional here"
-
-# Warn on schema names exceeding Dataverse's 100-char limit
-Get-ChildItem "$ws\translations" -Filter "*.mcs.yml" -ErrorAction SilentlyContinue | ForEach-Object {
-    $schemaLen = ($_.Name -replace '\.mcs\.yml$','').Length
-    if ($schemaLen -gt 100) {
-        WARN "Translation schema name is $schemaLen chars (>100): $($_.Name)"
-        WARN "Dataverse enforces 100-char limit — pac push will fail for this component."
-        WARN "Fix: rename the tool to a shorter display name in the source, then re-export."
-    }
-}
-
-$push1Out = & $PacExe copilot push --project-dir $ws 2>&1
-$push1Out | ForEach-Object { INFO $_ }
-if ($LASTEXITCODE -ne 0) {
-    WARN "pac push returned exit code $LASTEXITCODE"
-    if ($push1Out -match "StringLengthTooLong") {
-        WARN "A component schema name exceeds the 100-char DV limit (see warning above)."
-    }
-} else {
-    OK "First pac push succeeded"
-}
+Step "Step 4 — First pac push (agent settings, tools, skills, knowledge, connection refs)"
+INFO "Flow GUIDs were stripped — push creates tool botcomponents without flow links."
+& $PacExe copilot push --project-dir $ws 2>&1 | ForEach-Object { INFO $_ }
+if ($LASTEXITCODE -ne 0) { WARN "pac push exit $LASTEXITCODE — check output above" } else { OK "First push succeeded" }
 
 # ── Step 5: PATCH bot.configuration ──────────────────────────────────────────
-Step "[5/7] Patching bot.configuration (authoritative instructions + model)..."
-
-# IMPORTANT: bot.configuration is stored as a plain STRING in DV, not a JSON column.
-# @{configuration=$cfg} | ConvertTo-Json -Depth 1 correctly string-encodes the JSON
-# value, producing: {"configuration": "<escaped json string>"}
+Step "Step 5 — Patch bot.configuration (authoritative instructions + model)"
+INFO "pac push wrote settings.mcs.yml to bot.configuration."
+INFO "Now overwriting with agent-config.json (may have newer UI edits)."
 if (Test-Path $ConfigPath) {
     $cfg  = Get-Content $ConfigPath -Raw
+    # IMPORTANT: bot.configuration is a STRING field in DV, not a JSON column.
+    # ConvertTo-Json -Depth 1 correctly string-encodes the JSON value.
     $body = @{ configuration = $cfg } | ConvertTo-Json -Depth 1
     Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots($newBotId)" -Method PATCH -Headers $dv -Body $body | Out-Null
-    try {
-        $cfgObj = $cfg | ConvertFrom-Json
-        OK "bot.configuration patched"
-        INFO "Model       : $($cfgObj.agentSettings.model.series)"
-        INFO "Instructions: $($cfgObj.agentSettings.instructions.segments[0].value.Length) chars"
-    } catch {
-        OK "bot.configuration patched (could not parse for preview)"
-    }
+    $cfgObj = $cfg | ConvertFrom-Json
+    OK "bot.configuration patched"
+    INFO "  Model       : $($cfgObj.agentSettings.model.series)"
+    INFO "  Instructions: $($cfgObj.agentSettings.instructions.segments[0].value.Length) chars"
 } else {
-    WARN "agent-config.json not found at $ConfigPath — instructions not applied"
-    WARN "Run export.ps1 on the source environment to capture bot.configuration"
+    WARN "agent-config.json not found — instructions not patched. Run export.ps1 to capture it."
 }
 
-# ── Step 6: Create flows + remap GUIDs + second push ──────────────────────────
-Step "[6/7] Creating flows in target, remapping GUIDs, second pac push..."
-
+# ── Step 6: Create flows; remap GUIDs; second push ───────────────────────────
+Step "Step 6 — Create flows in target; remap GUIDs; second pac push"
 $wfDirs = Get-ChildItem (Join-Path $ws "workflows") -Directory -ErrorAction SilentlyContinue
-if ((-not $wfDirs) -or $wfDirs.Count -eq 0) {
-    OK "No workflows found — skipping flow creation and second push"
+if ($wfDirs.Count -eq 0) {
+    INFO "No workflows found — skipping"
 } else {
-    INFO "$($wfDirs.Count) workflow(s) to create in target"
+    $guidMap = @{}  # sourceGuid → newGuid
 
     foreach ($wfDir in $wfDirs) {
-        # Extract source GUID from folder name: {flowName}-{guid}
-        $sourceGuid = if ($wfDir.Name -match "([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$") {
-            $Matches[1] } else { $null }
-        if (-not $sourceGuid) { WARN "Cannot extract GUID from: $($wfDir.Name)"; continue }
-
         $metaFile = Join-Path $wfDir.FullName "metadata.yml"
         $wfFile   = Join-Path $wfDir.FullName "workflow.json"
-        if (-not (Test-Path $metaFile) -or -not (Test-Path $wfFile)) {
-            WARN "Missing metadata.yml or workflow.json in: $($wfDir.Name)"; continue
-        }
-
-        $meta     = Get-Content $metaFile -Raw
-        $wfJson   = Get-Content $wfFile -Raw
+        if (-not (Test-Path $metaFile) -or -not (Test-Path $wfFile)) { continue }
+        $meta   = Get-Content $metaFile -Raw
+        $wfJson = Get-Content $wfFile -Raw
         $flowName = if ($meta -match "(?m)^name: (.+)") { $Matches[1].Trim() } else { $wfDir.Name }
         $newGuid  = [Guid]::NewGuid().ToString()
-
-        $payload = @{
-            workflowid    = $newGuid
-            name          = $flowName
-            category      = 5
-            type          = 1
-            primaryentity = "none"
-            statecode     = 0
-            statuscode    = 1
-            clientdata    = $wfJson
-        } | ConvertTo-Json -Depth 3
-
         try {
-            Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/workflows" -Method POST -Headers $dv -Body $payload | Out-Null
-            $guidMap[$sourceGuid] = $newGuid
-            OK "Flow '$flowName': $sourceGuid → $newGuid"
-        } catch {
-            WARN "Failed to create flow '$flowName': $($_.Exception.Message)"
-        }
+            Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/workflows" -Method POST -Headers $dv -Body (@{
+                workflowid = $newGuid; name = $flowName; category = 5; type = 1
+                primaryentity = "none"; statecode = 0; statuscode = 1; clientdata = $wfJson
+            } | ConvertTo-Json -Depth 3) | Out-Null
+            if ($wfDir.Name -match "([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$") {
+                $guidMap[$Matches[1]] = $newGuid
+            }
+            OK "  Flow '$flowName' → $newGuid"
+        } catch { WARN "  Flow '$flowName' failed: $($_.Exception.Message)" }
     }
 
-    if ($guidMap.Count -eq 0) {
-        WARN "No flows created — skipping GUID remap and second push"
-    } else {
-        INFO "Patching new GUIDs into tool YAML files..."
+    # Patch WorkflowTool files
+    foreach ($fn in $strippedWorkflow.Keys) {
+        $srcGuid = $strippedWorkflow[$fn]; $newGuid = $guidMap[$srcGuid]
+        if (-not $newGuid) { WARN "No new GUID for WorkflowTool $fn ($srcGuid)"; continue }
+        $fp = Join-Path $ws "translations\$fn"
+        Set-Content $fp -Value ((Get-Content $fp -Raw) -replace "kind: WorkflowTool", "kind: WorkflowTool`nworkflowId: $newGuid") -Encoding UTF8 -NoNewline
+        OK "  WorkflowTool '$fn' → $newGuid"
+    }
 
-        # WorkflowTool: insert workflowId after "kind: WorkflowTool"
-        foreach ($fileName in $strippedWorkflowIds.Keys) {
-            $newGuid = $guidMap[$strippedWorkflowIds[$fileName]]
-            if (-not $newGuid) { WARN "No target GUID for WorkflowTool: $fileName"; continue }
-            $filePath = Join-Path $ws "translations\$fileName"
-            $yml = Get-Content $filePath -Raw
-            $fixed = $yml -replace "kind: WorkflowTool", "kind: WorkflowTool`nworkflowId: $newGuid"
-            Set-Content $filePath -Value $fixed -Encoding UTF8 -NoNewline
-            OK "WorkflowTool '$fileName' → workflowId: $newGuid"
-        }
+    # Patch AgentFlow files
+    foreach ($fn in $strippedFlow.Keys) {
+        $srcGuid = $strippedFlow[$fn]; $newGuid = $guidMap[$srcGuid]
+        if (-not $newGuid) { WARN "No new GUID for AgentFlow $fn ($srcGuid)"; continue }
+        $fp = Join-Path $ws "actions\$fn"
+        Set-Content $fp -Value ((Get-Content $fp -Raw) -replace "kind: InvokeFlowTaskAction", "kind: InvokeFlowTaskAction`n  flowId: $newGuid") -Encoding UTF8 -NoNewline
+        OK "  AgentFlow '$fn' → $newGuid"
+    }
 
-        # TaskDialog/AgentFlow: insert "  flowId:" after "kind: InvokeFlowTaskAction"
-        foreach ($fileName in $strippedFlowIds.Keys) {
-            $newGuid = $guidMap[$strippedFlowIds[$fileName]]
-            if (-not $newGuid) { WARN "No target GUID for AgentFlow: $fileName"; continue }
-            $filePath = Join-Path $ws "actions\$fileName"
-            $yml = Get-Content $filePath -Raw
-            $fixed = $yml -replace "kind: InvokeFlowTaskAction", "kind: InvokeFlowTaskAction`n  flowId: $newGuid"
-            Set-Content $filePath -Value $fixed -Encoding UTF8 -NoNewline
-            OK "AgentFlow '$fileName' → flowId: $newGuid"
-        }
+    INFO "Re-pushing with remapped flow GUIDs..."
+    & $PacExe copilot push --project-dir $ws 2>&1 | ForEach-Object { INFO $_ }
+    if ($LASTEXITCODE -ne 0) { WARN "Second push exit $LASTEXITCODE" } else { OK "Second push succeeded — tools linked to flows" }
+}
 
-        INFO "Second pac push — linking tools to flows..."
-        $push2Out = & $PacExe copilot push --project-dir $ws 2>&1
-        $push2Out | ForEach-Object { INFO $_ }
-        if ($LASTEXITCODE -ne 0) {
-            WARN "Second pac push returned exit code $LASTEXITCODE"
-        } else {
-            OK "Second pac push succeeded — tools linked to flows"
+# ── Step 7: Fix skills with assets ───────────────────────────────────────────
+if (Test-Path $SkillsDir) {
+    $skillFolders = Get-ChildItem $SkillsDir -Directory -ErrorAction SilentlyContinue
+    if ($skillFolders.Count -gt 0) {
+        Step "Step 7 — Fix skills with assets (re-upload binary bundles)"
+        foreach ($sf in $skillFolders) {
+            $skillName = $sf.Name
+            $skillMd   = Get-Content (Join-Path $sf.FullName "SKILL.md") -Raw -ErrorAction SilentlyContinue
+            $dispName  = if ($skillMd -match "(?m)^name:\s*(.+)") { $Matches[1].Trim() } else { $skillName }
+            $desc      = if ($skillMd -match "(?m)^description:\s*(.+)") { $Matches[1].Trim() } else { "" }
+
+            # Delete broken skill (bic:bundle=) if present from pac push
+            $broken = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotid_value eq '$newBotId' and name eq '$dispName'&`$select=botcomponentid,data" -Headers $dv).value |
+                Where-Object { $_.data -like "*bic:bundle=*" }
+            foreach ($b in $broken) {
+                $bChildren = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotcomponentid_value eq '$($b.botcomponentid)'&`$select=botcomponentid" -Headers $dv).value
+                $bChildren | ForEach-Object { try { Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($_.botcomponentid))" -Method DELETE -Headers $dv } catch {} }
+                try { Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($b.botcomponentid))" -Method DELETE -Headers $dv } catch {}
+            }
+
+            # Rebuild ZIP and re-upload
+            $tmpZip = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "$skillName-$(Get-Date -Format 'yyyyMMddHHmmss').zip")
+            Compress-Archive -Path (Join-Path $sf.FullName "*") -DestinationPath $tmpZip -Force
+            $newSkill = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents" -Method POST -Headers $dv -Body (@{
+                name = $dispName; description = $desc; componenttype = 9
+                "parentbotid@odata.bind" = "/bots($newBotId)"
+                filedata = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($tmpZip))
+                filedata_name = "$skillName.zip"
+            } | ConvertTo-Json -Depth 3)
+            Remove-Item $tmpZip -Force
+            OK "  Skill '$skillName' re-uploaded → $($newSkill.botcomponentid)"
         }
     }
 }
 
-# ── Step 7: Summary ───────────────────────────────────────────────────────────
-Step "[7/7] Summary"
-$envId = $OrgNoTrail -replace "https://","" -replace "\.crm\.dynamics\.com",""
-
+# ── Summary ───────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Install Complete"                          -ForegroundColor Cyan
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "╔══════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║  Install Complete                        ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Bot ID : $newBotId"
+$envId = $OrgNoTrail -replace "https://","" -replace "\.crm\.dynamics\.com",""
 Write-Host "  URL    : https://copilotstudio.microsoft.com/environments/$envId/home" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  What was done:"
-Write-Host "    [x] Agent created / found in Dataverse"
-Write-Host "    [x] Agent YAML pushed (settings, tools, skills, knowledge, connection refs)"
+Write-Host "  Steps completed:"
+Write-Host "    [x] Agent created in Dataverse"
+Write-Host "    [x] YAML pushed (tools, skills, knowledge, connection refs)"
 Write-Host "    [x] bot.configuration patched (instructions + model)"
-if ($guidMap.Count -gt 0) {
-    Write-Host "    [x] $($guidMap.Count) flow(s) created and linked to tools"
-} else {
-    Write-Host "    [-] No flows (agent has no WorkflowTool or AgentFlow tools)"
-}
+Write-Host "    [x] $(($strippedWorkflow.Count + $strippedFlow.Count)) flow(s) created and linked"
 Write-Host ""
-Write-Host "  MANUAL STEP REQUIRED — wire connection references (one-time per environment):" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "  Flows remain in Draft until their connection references are wired."
-Write-Host "    1. PPAC → <env> → Connections → New connection (create each required connector)"
-Write-Host "    2. Default Solution → Connection References → Edit → link each to a connection"
-Write-Host "    3. Flows activate automatically once all connections are wired"
-Write-Host ""
-
-# List connectors from connectionreferences.mcs.yml
-$connRefFile = Join-Path $ws "connectionreferences.mcs.yml"
-if (Test-Path $connRefFile) {
-    $connRefYaml = Get-Content $connRefFile -Raw
-    $connectors  = @($connRefYaml -split "`n" | Where-Object { $_ -match "connectorId:" } |
-        ForEach-Object { ($_ -replace '\s*connectorId:\s*/providers/Microsoft.PowerApps/apis/','').Trim() })
-    if ($connectors.Count -gt 0) {
-        Write-Host "  Connectors required:" -ForegroundColor White
-        $connectors | ForEach-Object { Write-Host "    • $_" -ForegroundColor Cyan }
-        Write-Host ""
-    }
-}
-
-Write-Host "  Workspace (keep for debugging, safe to delete): $WorkspaceDir"
-Write-Host ""
+Write-Host "  MANUAL: Wire connections in PPAC to activate flows" -ForegroundColor Yellow
+Write-Host "  Workspace (debug): $WorkspaceDir"

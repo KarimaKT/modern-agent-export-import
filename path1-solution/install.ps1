@@ -1,219 +1,240 @@
 <#
 .SYNOPSIS
-    Import a Modern Copilot Studio agent from a solution package.
+    Import a Modern Copilot Studio agent from an export bundle (agent.zip + skills-with-assets/).
 
 .DESCRIPTION
-    1. pac solution import — restores everything: bot.configuration (from configuration.json
-       in the ZIP), InlineAgentSkills, ConnectorTool, McpTool, ConnectedAgentTool,
-       WorkflowTool (flow tools), TaskDialog (agent flows), eval test cases, and
-       connection reference stubs.
+    This script fully restores a Modern Copilot Studio agent from a bundle produced by export.ps1.
+    It requires NO prior knowledge of the agent — everything needed is in the bundle folder.
 
-    2. Skills-with-assets re-upload — if a skills-with-assets/ folder exists alongside
-       agent.zip, the script detects broken skill bundle references and re-uploads the
-       binary skill ZIPs via the Dataverse API.
+    THE BUNDLE FOLDER MUST CONTAIN:
+      agent.zip              The Dataverse solution package
+      manifest.json          Export inventory (agent schema, connectors, skills with assets)
+      skills-with-assets/    Binary skill files (only present if agent has ZIP-uploaded skills)
 
-       WHY: Skills uploaded as ZIP files (Python/binary assets) cause pac solution export
-       to capture the botcomponent RECORD but not the binary bundle blob. After import the
-       skill appears in the UI but its Python assets are missing. Re-uploading fixes this.
+    WHAT pac solution import HANDLES AUTOMATICALLY (no extra steps needed):
+    ─────────────────────────────────────────────────────────────────────
+      bot.configuration     Instructions, model series, AI settings — restored from
+                            bots/{schema}/configuration.json inside agent.zip
+      InlineAgentSkills     Markdown-only skills — fully restored
+      Flow tools            WorkflowTool and TaskDialog tools — restored with correct GUIDs
+                            (solution import preserves GUIDs — no remap needed)
+      ConnectorTool/McpTool Connection reference records created (empty — wire manually)
+      ConnectedAgentTool    Restored by schema name — target agent must exist
+      URL knowledge sources Restored from knowledge/*.mcs.yml
+      Evaluation test cases All MultiTurnEvaluationCase records restored
+      Connection references Created with null connectionid (normal — wire manually after)
 
-    3. Prints connection wiring instructions for any connection references in the package.
+    WHAT THIS SCRIPT ADDS ON TOP (the one thing solution import cannot do):
+    ──────────────────────────────────────────────────────────────────────
+      Skills with assets    ZIP-uploaded skills (containing Python files, images, etc.)
+                            Solution import restores the type-9 skill record and type-14
+                            file component records, but does NOT reconstitute the binary
+                            bundle blob (bic:bundle=...) that the skill references at runtime.
+                            This script detects those broken skills and re-uploads them by:
+                              1. Building a ZIP from the files in skills-with-assets/
+                              2. Deleting the broken skill + its stale file components
+                              3. Re-uploading via DV API — creates a fresh bundle in target env
 
-.PARAMETER PacExe
-    Path to pac.exe. Auto-detected from PATH or NuGet cache if omitted.
+    MANUAL STEP REQUIRED AFTER IMPORT (for agents with connectors):
+    ───────────────────────────────────────────────────────────────
+      Power Automate flows that use connectors (Office 365, Power BI, Dataverse, etc.)
+      are created in Draft state. They activate automatically once their connection
+      references are wired to real connections. This is normal Power Platform behavior.
+        1. Go to PPAC → your environment → Connections → New connection
+        2. Create a connection for each required connector
+        3. Go to Default Solution → Connection References → edit each → link to connection
+        4. Flows activate automatically
+
+    PREREQUISITES
+    ─────────────
+    pac CLI:  https://aka.ms/PowerPlatformCLI
+    az CLI:   https://aka.ms/installazurecliwindows
+    pac auth: pac auth create --environment https://yourorg.crm.dynamics.com
+    az login: az login (with Dataverse access to target env)
+
+.PARAMETER BundleDir
+    Path to the export bundle folder (contains agent.zip, manifest.json, skills-with-assets/).
+    Defaults to current directory.
 
 .PARAMETER TargetOrgUrl
-    Dataverse environment URL for the target environment.
-
-.PARAMETER ZipPath
-    Path to agent.zip (the exported solution package).
-
-.PARAMETER SkillsDir
-    Path to skills-with-assets/ folder. Auto-detected if omitted (looks next to ZipPath).
+    Dataverse org URL for the target environment.
 
 .PARAMETER AuthIndex
-    pac auth profile index (default: 1).
+    pac auth index for the target environment.
+
+.PARAMETER PacExe
+    Path to pac.exe. Auto-detected from PATH or NuGet cache if not specified.
 
 .EXAMPLE
-    .\path1-solution\install.ps1 `
-      -TargetOrgUrl "https://targetorg.crm.dynamics.com" `
-      -ZipPath      ".\agent.zip"
+    .\install.ps1 -TargetOrgUrl "https://myorg.crm.dynamics.com"
 
 .EXAMPLE
-    .\path1-solution\install.ps1 `
-      -TargetOrgUrl "https://targetorg.crm.dynamics.com" `
-      -ZipPath      "C:\releases\v1.0\agent.zip" `
-      -SkillsDir    "C:\releases\v1.0\skills-with-assets"
+    .\install.ps1 -BundleDir "C:\downloads\my-agent-bundle" -TargetOrgUrl "https://myorg.crm.dynamics.com" -AuthIndex 2
 #>
 param(
-    [string]$PacExe       = "",
-    [Parameter(Mandatory)][string]$TargetOrgUrl,
-    [Parameter(Mandatory)][string]$ZipPath,
-    [string]$SkillsDir    = "",
-    [int]   $AuthIndex    = 1
+    [string] $BundleDir    = ".",
+    [Parameter(Mandatory)][string] $TargetOrgUrl,
+    [int]    $AuthIndex    = 1,
+    [string] $PacExe       = ""
 )
 
 $ErrorActionPreference = "Stop"
+$OrgNoTrail = $TargetOrgUrl.TrimEnd("/")
 
-function Step  { Write-Host "`n$args" -ForegroundColor Cyan }
-function OK    { Write-Host "  OK  $args" -ForegroundColor Green }
-function INFO  { Write-Host "      $args" -ForegroundColor Gray }
-function WARN  { Write-Host "  !   $args" -ForegroundColor Yellow }
-function ERR   { Write-Host "  ERR $args" -ForegroundColor Red; exit 1 }
-
-# ── Locate pac.exe ─────────────────────────────────────────────────────────────
+# Resolve pac.exe
 if (-not $PacExe) {
     $PacExe = (Get-Command "pac" -ErrorAction SilentlyContinue)?.Source
     if (-not $PacExe) {
         $PacExe = Get-ChildItem "$env:USERPROFILE\.nuget\packages\microsoft.powerapps.cli" -Filter "pac.exe" -Recurse -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
     }
-    if (-not $PacExe) { ERR "pac CLI not found. Install: https://aka.ms/PowerPlatformCLI" }
+    if (-not $PacExe) { Write-Error "pac CLI not found. Install: https://aka.ms/PowerPlatformCLI" }
 }
 
-$OrgNoTrail = $TargetOrgUrl.TrimEnd("/")
-$ZipPath    = Resolve-Path $ZipPath | Select-Object -ExpandProperty Path
+function Step([string]$msg) { Write-Host "`n>>> $msg" -ForegroundColor Cyan }
+function OK([string]$msg)   { Write-Host "    OK  $msg" -ForegroundColor Green }
+function WARN([string]$msg) { Write-Host "    !   $msg" -ForegroundColor Yellow }
+function INFO([string]$msg) { Write-Host "        $msg" -ForegroundColor DarkGray }
 
-if (-not $SkillsDir) {
-    $SkillsDir = Join-Path (Split-Path $ZipPath -Parent) "skills-with-assets"
-}
+# Validate bundle
+$zipPath      = Join-Path $BundleDir "agent.zip"
+$manifestPath = Join-Path $BundleDir "manifest.json"
+if (-not (Test-Path $zipPath))      { Write-Error "agent.zip not found in: $BundleDir" }
+if (-not (Test-Path $manifestPath)) { Write-Error "manifest.json not found in: $BundleDir" }
+$manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 
 Write-Host ""
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Modern Agent Install — Solution Path"      -ForegroundColor Cyan
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Target : $OrgNoTrail"
-Write-Host "  ZIP    : $ZipPath"
-Write-Host "  Skills : $(if (Test-Path $SkillsDir) { $SkillsDir } else { '(none)' })"
+Write-Host "╔══════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║  Modern Agent Install — Solution Path    ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "  Target  : $OrgNoTrail"
+Write-Host "  Agent   : $($manifest.agentName) ($($manifest.agentSchema))"
+Write-Host "  Bundle  : $BundleDir"
+Write-Host "  ZIP     : $([Math]::Round((Get-Item $zipPath).Length/1KB))KB"
+Write-Host "  Skills with assets: $($manifest.skillsWithAssets.Count)"
+Write-Host ""
+
+# ── Acquire DV token ──────────────────────────────────────────────────────────
+Step "Acquiring Dataverse token..."
+$token = (az account get-access-token --resource $OrgNoTrail | ConvertFrom-Json).accessToken
+$dv = @{ Authorization="Bearer $token"; "OData-MaxVersion"="4.0"; "OData-Version"="4.0"; Accept="application/json"; "Content-Type"="application/json"; Prefer="return=representation" }
+OK "Token acquired"
 
 # ── Step 1: pac solution import ───────────────────────────────────────────────
-Step "[1/4] Importing solution package (pac solution import)..."
+Step "Step 1 — pac solution import"
+INFO "This step handles:"
+INFO "  - bot.configuration (instructions, model) — from bots/*/configuration.json in ZIP"
+INFO "  - All tools (ConnectorTool, McpTool, WorkflowTool, TaskDialog)"
+INFO "  - InlineAgentSkill (markdown-only skills)"
+INFO "  - URL knowledge sources"
+INFO "  - Power Automate flows (GUIDs preserved — no remap needed)"
+INFO "  - Connection references (created empty — wire manually after)"
+INFO "  - Evaluation test cases"
+INFO "  - Skills with assets (file records imported, bundle needs Step 2)"
 
 & $PacExe auth select --index $AuthIndex | Out-Null
-$importOut = & $PacExe solution import --path $ZipPath --environment $OrgNoTrail --activate-plugins --force-overwrite 2>&1
-$importOut | ForEach-Object { INFO $_ }
-if ($LASTEXITCODE -ne 0) { ERR "pac solution import failed (exit $LASTEXITCODE)" }
-OK "Solution imported successfully"
-INFO "Imported: bot.configuration, tools, skills, flows, eval cases, connection ref stubs"
+& $PacExe solution import --path $zipPath --environment $OrgNoTrail 2>&1 | ForEach-Object { INFO $_ }
+if ($LASTEXITCODE -ne 0) { Write-Error "pac solution import failed. See output above." }
+OK "Solution import complete"
 
-# ── Step 2: Acquire DV token ──────────────────────────────────────────────────
-Step "[2/4] Acquiring Dataverse token..."
+# ── Step 2: Fix skills with assets (bic:bundle= re-upload) ───────────────────
+if ($manifest.skillsWithAssets.Count -gt 0) {
+    Step "Step 2 — Fix skills with assets (re-upload binary bundles)"
+    INFO "pac solution import restores the skill record and file components,"
+    INFO "but cannot reconstitute the binary bundle blob (bic:bundle=...) that the"
+    INFO "skill references at runtime. This step rebuilds and re-uploads each ZIP skill."
 
-$tokenJson = az account get-access-token --resource $OrgNoTrail 2>&1
-if ($LASTEXITCODE -ne 0) { ERR "az account get-access-token failed. Run: az login" }
-$token   = ($tokenJson | ConvertFrom-Json).accessToken
-$headers = @{
-    Authorization      = "Bearer $token"
-    "OData-MaxVersion" = "4.0"
-    "OData-Version"    = "4.0"
-    Accept             = "application/json"
-    "Content-Type"     = "application/json"
-}
-OK "DV token acquired"
+    # Find the imported bot
+    $bot = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots?`$filter=schemaname eq '$($manifest.agentSchema)'&`$select=botid,name" -Headers $dv).value[0]
+    if (-not $bot) { Write-Error "Bot '$($manifest.agentSchema)' not found after import" }
+    $botId = $bot.botid
+    INFO "Bot: $($bot.name) ($botId)"
 
-# ── Step 3: Re-upload skills-with-assets ─────────────────────────────────────
-Step "[3/4] Checking for skills-with-assets..."
-
-if (-not (Test-Path $SkillsDir)) {
-    OK "No skills-with-assets folder found — skipping (no binary skill re-upload needed)"
-} else {
-    $manifestPath = Join-Path $SkillsDir "manifest.json"
-    if (-not (Test-Path $manifestPath)) {
-        WARN "skills-with-assets/ folder exists but manifest.json is missing — skipping re-upload"
-        WARN "Run path1-solution\export.ps1 again to regenerate skills-with-assets/manifest.json"
-    } else {
-        $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-
-        foreach ($skillMeta in $manifest) {
-            WARN "Re-uploading skill: $($skillMeta.skillName)"
-
-            # Find the imported botcomponent (broken bundle ref)
-            $existing = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=schemaname eq '$($skillMeta.schemaName)' and componenttype eq 9&`$select=botcomponentid,name,data,_parentbotid_value" -Headers $headers).value
-
-            if ($existing.Count -eq 0) {
-                WARN "  Skill '$($skillMeta.skillName)' not found in target after import — skipping"
-                continue
-            }
-
-            $skillRecord   = $existing[0]
-            $skillCompId   = $skillRecord.botcomponentid
-            $parentBotId   = $skillRecord."_parentbotid_value"
-
-            # Build fresh ZIP from exported files
-            $skillSrcDir  = Join-Path $SkillsDir $skillMeta.skillName
-            $rebuildZip   = Join-Path $SkillsDir "$($skillMeta.skillName)_rebuild.zip"
-            if (Test-Path $rebuildZip) { Remove-Item $rebuildZip -Force }
-
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            [System.IO.Compression.ZipFile]::CreateFromDirectory($skillSrcDir, $rebuildZip)
-            INFO "  Rebuilt ZIP: $rebuildZip ($([math]::Round((Get-Item $rebuildZip).Length/1KB,1)) KB)"
-
-            # Delete existing broken child file components (type 14)
-            $oldFiles = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotcomponentid_value eq '$skillCompId' and componenttype eq 14&`$select=botcomponentid" -Headers $headers).value
-            foreach ($of in $oldFiles) {
-                Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($of.botcomponentid))" -Method DELETE -Headers $headers | Out-Null
-                INFO "  Deleted stale file component: $($of.botcomponentid)"
-            }
-
-            # Re-upload the ZIP as a new type-14 file component
-            $zipBytes  = [System.IO.File]::ReadAllBytes($rebuildZip)
-            $zipB64    = [System.Convert]::ToBase64String($zipBytes)
-            $uploadBody = @{
-                name                        = "$($skillMeta.skillName)_bundle"
-                componenttype               = 14
-                "parentbotcomponentid@odata.bind" = "/botcomponents($skillCompId)"
-                "parentbotid@odata.bind"    = "/bots($parentBotId)"
-                filedata                    = $zipB64
-                filedata_name               = "$($skillMeta.skillName).zip"
-            } | ConvertTo-Json -Depth 3
-
-            $created = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents" -Method POST -Headers $headers -Body $uploadBody
-            OK "  Skill '$($skillMeta.skillName)' re-uploaded successfully"
-            INFO "  New component ID: $($created.botcomponentid)"
-
-            # Clean up rebuild ZIP
-            Remove-Item $rebuildZip -Force
+    foreach ($skillEntry in $manifest.skillsWithAssets) {
+        $skillName    = $skillEntry.skill
+        $skillAssets  = Join-Path $BundleDir "skills-with-assets\$skillName"
+        if (-not (Test-Path $skillAssets)) {
+            WARN "Skill assets folder not found: $skillAssets — skipping '$skillName'"
+            continue
         }
+
+        INFO ""
+        INFO "Processing skill: $skillName"
+
+        # Find broken skill on target (has bic:bundle= in data)
+        $brokenSkill = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotid_value eq '$botId' and name eq '$skillName'&`$select=botcomponentid,data" -Headers $dv).value |
+            Where-Object { $_.data -like "*bic:bundle=*" }
+
+        if (-not $brokenSkill) {
+            WARN "Broken skill '$skillName' not found in target DV — may have been fixed already"
+            continue
+        }
+
+        # Delete broken skill and its stale type-14 children
+        $brokenChildren = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotcomponentid_value eq '$($brokenSkill[0].botcomponentid)'&`$select=botcomponentid" -Headers $dv).value
+        foreach ($child in $brokenChildren) {
+            try { Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($child.botcomponentid))" -Method DELETE -Headers $dv } catch {}
+        }
+        try { Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($brokenSkill[0].botcomponentid))" -Method DELETE -Headers $dv } catch {}
+        INFO "Deleted broken skill record + $($brokenChildren.Count) stale file component(s)"
+
+        # Rebuild ZIP from exported files
+        $tmpZip = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "$skillName-$(Get-Date -Format 'yyyyMMddHHmmss').zip")
+        Compress-Archive -Path (Join-Path $skillAssets "*") -DestinationPath $tmpZip -Force
+        INFO "Rebuilt ZIP: $tmpZip ($([Math]::Round((Get-Item $tmpZip).Length/1KB))KB)"
+
+        # Re-upload via DV API
+        # Read SKILL.md for name/description
+        $skillMd   = Get-Content (Join-Path $skillAssets "SKILL.md") -Raw -ErrorAction SilentlyContinue
+        $skillDisplayName = if ($skillMd -match "(?m)^name:\s*(.+)") { $Matches[1].Trim() } else { $skillName }
+        $skillDesc = if ($skillMd -match "(?m)^description:\s*(.+)") { $Matches[1].Trim() } else { "" }
+
+        # Upload as multipart form — DV skill upload endpoint
+        $zipBytes  = [System.IO.File]::ReadAllBytes($tmpZip)
+        $zipBase64 = [Convert]::ToBase64String($zipBytes)
+
+        # POST the new skill botcomponent with filedata
+        $newSkill = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents" -Method POST -Headers $dv -Body (@{
+            name          = $skillDisplayName
+            description   = $skillDesc
+            componenttype = 9
+            "parentbotid@odata.bind" = "/bots($botId)"
+            filedata      = $zipBase64
+            filedata_name = "$skillName.zip"
+        } | ConvertTo-Json -Depth 3)
+
+        Remove-Item $tmpZip -Force
+        OK "Skill '$skillName' re-uploaded → $($newSkill.botcomponentid)"
     }
+} else {
+    Step "Step 2 — No skills with assets (skipping)"
+    OK "No binary skill bundles to fix"
 }
-
-# ── Step 4: Connection wiring instructions ────────────────────────────────────
-Step "[4/4] Connection wiring (manual step required)..."
-
-$connRefs = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/connectionreferences?`$select=connectionreferencelogicalname,customconnectorid" -Headers $headers -ErrorAction SilentlyContinue).value
-if ($null -eq $connRefs) { $connRefs = @() }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Install Complete"                          -ForegroundColor Cyan
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "╔══════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║  Install Complete                        ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  What was done:"
-Write-Host "    [x] Solution imported (bot.configuration, tools, skills, flows, eval cases)"
-if (Test-Path $manifestPath -ErrorAction SilentlyContinue) {
-    Write-Host "    [x] Skill assets re-uploaded" -ForegroundColor Green
-} else {
-    Write-Host "    [-] Skills-with-assets: none found or skipped"
+$envId = $OrgNoTrail -replace "https://","" -replace "\.crm\.dynamics\.com",""
+Write-Host "  Agent in Copilot Studio:"
+Write-Host "  https://copilotstudio.microsoft.com/environments/$envId/home" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Status:"
+Write-Host "    [x] Solution imported (bot, tools, skills, flows, knowledge, eval cases)"
+Write-Host "    [x] bot.configuration applied (instructions, model)"
+if ($manifest.skillsWithAssets.Count -gt 0) {
+    Write-Host "    [x] $($manifest.skillsWithAssets.Count) skill(s) with assets re-uploaded"
 }
 Write-Host ""
-Write-Host "  MANUAL STEP: Wire connection references (one-time per environment)" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "  Flows remain in Draft state until their connection references are wired."
-Write-Host "  Steps:"
-Write-Host "    1. Go to PPAC → <your env> → Connections → New connection"
-Write-Host "    2. Create a connection for each required connector"
-Write-Host "    3. Go to Solutions → <solution> → Connection References"
-Write-Host "    4. Edit each connection reference → link to the new connection"
-Write-Host "    5. Flows activate automatically once all connections are wired"
-Write-Host ""
-Write-Host "  Connection references in this environment:"
-if ($connRefs.Count -eq 0) {
-    Write-Host "    (none detected — may be in the imported solution, check in PPAC)"
-} else {
-    foreach ($cr in $connRefs) {
-        Write-Host "    • $($cr.connectionreferencelogicalname)"
-    }
+if ($manifest.connectorsRequired.Count -gt 0) {
+    Write-Host "  MANUAL STEP — wire connections (one-time per environment):" -ForegroundColor Yellow
+    Write-Host "    Flows are in Draft until connections are wired."
+    Write-Host "    Connectors needed:"
+    $manifest.connectorsRequired | ForEach-Object { Write-Host "      • $_" -ForegroundColor Cyan }
+    Write-Host ""
+    Write-Host "    1. PPAC → Connections → New connection → create one per connector"
+    Write-Host "    2. Default Solution → Connection References → edit each → link to connection"
+    Write-Host "    3. Flows activate automatically"
 }
-Write-Host ""
-Write-Host "  Open the agent: https://copilotstudio.microsoft.com"
-Write-Host ""

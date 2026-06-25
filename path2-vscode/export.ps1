@@ -1,245 +1,218 @@
 <#
 .SYNOPSIS
-    Export a Modern Copilot Studio agent for VS Code developer iteration.
+    Export a Modern Copilot Studio agent for VS Code editing (clone/push workflow).
 
 .DESCRIPTION
-    'pac copilot clone' alone misses three things for Modern agents. This script fills them:
+    Produces a source-control-friendly folder structure for editing in VS Code:
+      sample/<AgentName>/       YAML from pac copilot clone (all tools, skills, flows)
+      sample/agent-config.json  Authoritative bot.configuration (instructions, model)
+      skills-with-assets/       Binary files for ZIP-uploaded skills
 
-    GAP 1 — Instructions live in bot.configuration, not YAML
-        settings.mcs.yml reflects what was last pushed via pac CLI. Edits made in the
-        Copilot Studio UI go to bot.configuration in Dataverse (always authoritative).
-        This script exports it to sample/agent-config.json.
+    WHY THIS SCRIPT EXISTS (the two things pac copilot clone misses)
+    ───────────────────────────────────────────────────────────────
+    pac copilot clone is NOT broken — it correctly walks the agent's component graph
+    and captures everything in YAML. It reliably captures:
+      - All tool definitions (ConnectorTool, McpTool, WorkflowTool, TaskDialog)
+      - All flow definitions (workflow.json)
+      - All connection references (connectionreferences.mcs.yml)
+      - InlineAgentSkill markdown skills (in translations/*.mcs.yml)
+      - URL knowledge sources (in knowledge/*.mcs.yml)
 
-    GAP 2 — InlineAgentSkill content is in YAML (pac clone captures it)
-        Exported in translations/*.mcs.yml — no extra work needed.
+    But it misses two things:
 
-    GAP 3 — Flow GUIDs are env-specific
-        Every WorkflowTool (translations/*.mcs.yml) and TaskDialog/AgentFlow
-        (actions/*.mcs.yml) embeds a source-env GUID that doesn't exist in the target.
-        install.ps1 handles the remap. Just export cleanly here.
+    GAP 1 — bot.configuration (instructions may be stale in YAML)
+      settings.mcs.yml contains instructions as of the LAST pac push.
+      Any edits in the Copilot Studio UI write to bot.configuration in Dataverse,
+      NOT back to settings.mcs.yml. The two can silently diverge.
+      This script exports the authoritative bot.configuration to agent-config.json.
 
-.PARAMETER PacExe
-    Path to pac.exe. Auto-detected from PATH or NuGet cache if omitted.
+    GAP 2 — Binary skill assets not in YAML
+      Skills uploaded as ZIP files (containing Python scripts, images, etc.) store
+      a bic:bundle= reference token in their YAML. The actual binary files are in
+      type-14 botcomponents (filedata field) — pac clone does not capture binaries.
+      This script downloads them to skills-with-assets/{skill-name}/.
 
-.PARAMETER SourceOrgUrl
-    Dataverse environment URL, e.g. https://myorg.crm.dynamics.com
+    WHAT THE VS CODE WORKFLOW LOOKS LIKE
+    ─────────────────────────────────────
+    1. Run export.ps1 → get sample/ folder + agent-config.json + skills-with-assets/
+    2. Edit YAML in VS Code:
+         settings.mcs.yml      → instructions, model, auth
+         translations/*.mcs.yml → tool descriptions, inputs, outputs
+         knowledge/*.mcs.yml    → URL knowledge source URLs
+         workflows/*/workflow.json → flow logic
+    3. Run path2-vscode/install.ps1 → deploy to any target environment
 
-.PARAMETER AgentName
-    Display name of the agent (used as the output folder name under sample/).
+    PREREQUISITES
+    ─────────────
+    pac CLI:  https://aka.ms/PowerPlatformCLI
+    az CLI:   https://aka.ms/installazurecliwindows
+    pac auth: pac auth create --environment https://yourorg.crm.dynamics.com
+    az login: az login (with Dataverse access to source env)
 
-.PARAMETER BotId
-    GUID of the bot record in Dataverse.
-
-.PARAMETER AuthIndex
-    pac auth profile index (default: 1).
-
-.PARAMETER OutputDir
-    Parent directory for the sample/ folder. Default: repo root (auto-detected from
-    script location).
+.PARAMETER SourceOrgUrl    Dataverse org URL for the source environment.
+.PARAMETER BotId           Dataverse bot GUID.
+.PARAMETER AgentName       Display name (used as folder name under sample/).
+.PARAMETER OutputDir       Root folder for output. Defaults to current directory.
+.PARAMETER AuthIndex       pac auth index for the source environment.
+.PARAMETER PacExe          Path to pac.exe. Auto-detected if not specified.
 
 .EXAMPLE
-    .\path2-vscode\export.ps1 `
-      -SourceOrgUrl "https://myorg.crm.dynamics.com" `
-      -AgentName    "Fabric Analyst" `
-      -BotId        "d01d7579-bf47-4da7-b751-22a419ade844"
-
-.EXAMPLE
-    .\path2-vscode\export.ps1 `
-      -SourceOrgUrl "https://myorg.crm.dynamics.com" `
-      -AgentName    "Fabric Analyst" `
-      -BotId        "d01d7579-bf47-4da7-b751-22a419ade844" `
-      -AuthIndex    2
+    .\export.ps1 -SourceOrgUrl "https://myorg.crm.dynamics.com" -BotId "xxxx-..." -AgentName "My Agent"
 #>
 param(
-    [string]$PacExe       = "",
-    [Parameter(Mandatory)][string]$SourceOrgUrl,
-    [Parameter(Mandatory)][string]$AgentName,
-    [Parameter(Mandatory)][string]$BotId,
-    [int]   $AuthIndex    = 1,
-    [string]$OutputDir    = ""
+    [Parameter(Mandatory)][string] $SourceOrgUrl,
+    [Parameter(Mandatory)][string] $BotId,
+    [Parameter(Mandatory)][string] $AgentName,
+    [string] $OutputDir = ".",
+    [int]    $AuthIndex = 1,
+    [string] $PacExe    = ""
 )
 
 $ErrorActionPreference = "Stop"
+$OrgNoTrail = $SourceOrgUrl.TrimEnd("/")
 
-function Step  { Write-Host "`n$args" -ForegroundColor Cyan }
-function OK    { Write-Host "  OK  $args" -ForegroundColor Green }
-function INFO  { Write-Host "      $args" -ForegroundColor Gray }
-function WARN  { Write-Host "  !   $args" -ForegroundColor Yellow }
-function ERR   { Write-Host "  ERR $args" -ForegroundColor Red; exit 1 }
-
-# ── Locate pac.exe ─────────────────────────────────────────────────────────────
 if (-not $PacExe) {
     $PacExe = (Get-Command "pac" -ErrorAction SilentlyContinue)?.Source
     if (-not $PacExe) {
         $PacExe = Get-ChildItem "$env:USERPROFILE\.nuget\packages\microsoft.powerapps.cli" -Filter "pac.exe" -Recurse -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
     }
-    if (-not $PacExe) { ERR "pac CLI not found. Install: https://aka.ms/PowerPlatformCLI" }
+    if (-not $PacExe) { Write-Error "pac CLI not found. Install: https://aka.ms/PowerPlatformCLI" }
 }
 
-$ScriptDir  = Split-Path $MyInvocation.MyCommand.Path -Parent
-$RepoRoot   = Split-Path $ScriptDir -Parent
-if (-not $OutputDir) { $OutputDir = $RepoRoot }
-$OrgNoTrail = $SourceOrgUrl.TrimEnd("/")
+function Step([string]$msg) { Write-Host "`n>>> $msg" -ForegroundColor Cyan }
+function OK([string]$msg)   { Write-Host "    OK  $msg" -ForegroundColor Green }
+function WARN([string]$msg) { Write-Host "    !   $msg" -ForegroundColor Yellow }
+function INFO([string]$msg) { Write-Host "        $msg" -ForegroundColor DarkGray }
 
 Write-Host ""
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Modern Agent Export — VS Code Path"        -ForegroundColor Cyan
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "╔══════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║  Modern Agent Export — VS Code Path      ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host "  Source : $OrgNoTrail"
 Write-Host "  Agent  : $AgentName ($BotId)"
-Write-Host "  Output : $OutputDir"
+Write-Host ""
 
-# ── Step 1: Validate agent is Modern via DV API ───────────────────────────────
-Step "[1/6] Validating agent (cliagent-1.0.0 check)..."
+# ── Acquire DV token ──────────────────────────────────────────────────────────
+Step "Acquiring Dataverse token..."
+$token = (az account get-access-token --resource $OrgNoTrail | ConvertFrom-Json).accessToken
+$dv = @{ Authorization="Bearer $token"; "OData-MaxVersion"="4.0"; "OData-Version"="4.0"; Accept="application/json" }
+OK "Token acquired"
 
-$tokenJson = az account get-access-token --resource $OrgNoTrail 2>&1
-if ($LASTEXITCODE -ne 0) { ERR "az account get-access-token failed. Run: az login" }
-$token   = ($tokenJson | ConvertFrom-Json).accessToken
-$headers = @{
-    Authorization      = "Bearer $token"
-    "OData-MaxVersion" = "4.0"
-    "OData-Version"    = "4.0"
-    Accept             = "application/json"
+# ── Step 1: Validate Modern agent ─────────────────────────────────────────────
+Step "Step 1 — Validate Modern Copilot Studio agent"
+$bot = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots($BotId)?`$select=botid,name,schemaname,template,configuration" -Headers $dv
+$cfg = $bot.configuration | ConvertFrom-Json
+
+$errors = @()
+if ($bot.template -ne "cliagent-1.0.0")                     { $errors += "template='$($bot.template)' — expected 'cliagent-1.0.0'" }
+if ($cfg.recognizer.'$kind' -ne "CLICopilotRecognizer")     { $errors += "recognizer='$($cfg.recognizer.'$kind')'" }
+$customTopics = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotid_value eq '$BotId' and componenttype eq 2&`$select=name" -Headers $dv).value
+if ($customTopics.Count -gt 0) { $errors += "$($customTopics.Count) custom topic(s)" }
+
+if ($errors.Count -gt 0) {
+    $errors | ForEach-Object { Write-Host "  ERROR: $_" -ForegroundColor Red }
+    Write-Error "Not a valid Modern Copilot Studio agent."
 }
+OK "$($bot.name) ($($bot.schemaname)) — Modern ✓"
 
-$bot = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots($BotId)?`$select=botid,name,schemaname,template,configuration" -Headers $headers
-
-if ($bot.template -ne "cliagent-1.0.0") {
-    WARN "Template: $($bot.template)"
-    ERR "This toolkit only supports Modern agents (template: cliagent-1.0.0). Use pac copilot clone/push directly for Classic agents."
-}
-OK "Template: cliagent-1.0.0 (Modern)"
-INFO "Schema: $($bot.schemaname)"
-
-# ── Step 2: pac copilot clone ─────────────────────────────────────────────────
-Step "[2/6] Cloning agent YAML (pac copilot clone)..."
-
+# ── Step 2: pac copilot clone → YAML ─────────────────────────────────────────
+Step "Step 2 — pac copilot clone (all YAML: tools, skills, flows, connection refs)"
 & $PacExe auth select --index $AuthIndex | Out-Null
 $sampleDir = Join-Path $OutputDir "sample"
-New-Item -ItemType Directory -Force -Path $sampleDir | Out-Null
+& $PacExe copilot clone --environment $OrgNoTrail --bot $BotId --display-name $AgentName --output-dir $sampleDir 2>&1 | ForEach-Object { INFO $_ }
+if ($LASTEXITCODE -ne 0) { Write-Error "pac copilot clone failed" }
+$agentDir  = Join-Path $sampleDir $AgentName
+$yamlCount = (Get-ChildItem $agentDir -Filter "*.mcs.yml" -Recurse).Count
+OK "$yamlCount YAML files cloned to: $agentDir"
 
-& $PacExe copilot clone --environment $OrgNoTrail --agent $AgentName --output-dir $sampleDir 2>&1 | ForEach-Object { INFO $_ }
-if ($LASTEXITCODE -ne 0) { ERR "pac copilot clone failed (exit $LASTEXITCODE)" }
-$agentDir = Join-Path $sampleDir $AgentName
-OK "Cloned to: $agentDir"
-
-# ── Step 3: Validate no custom topics ────────────────────────────────────────
-Step "[3/6] Checking for Classic custom topics (not expected in Modern agents)..."
-
-$topicsDir = Join-Path $agentDir "topics"
-if (Test-Path $topicsDir) {
-    $systemTopics = @("Greeting","Goodbye","Escalate","EndofConversation","Fallback","OnError","MultipleTopicsMatched","ResetConversation","StartOver","ThankYou","Signin","Search")
-    $customTopics = Get-ChildItem $topicsDir -Filter "*.mcs.yml" |
-        Where-Object { $systemTopics -notcontains ($_.BaseName -replace '\.mcs$', '') }
-    if ($customTopics.Count -gt 0) {
-        WARN "$($customTopics.Count) custom topic(s) found — agent may be Classic or hybrid:"
-        $customTopics | ForEach-Object { WARN "  - $($_.Name)" }
-        WARN "install.ps1 may not handle Classic topics correctly."
-    } else {
-        OK "No custom topics (system-only topics are expected)"
-    }
-} else {
-    OK "No topics directory — confirmed Modern agent"
-}
-
-# ── Step 4: Export bot.configuration ─────────────────────────────────────────
-Step "[4/6] Exporting authoritative bot.configuration..."
-
+# ── Step 3: Export authoritative bot.configuration ────────────────────────────
+Step "Step 3 — Export bot.configuration (authoritative instructions + model)"
+INFO "settings.mcs.yml may be stale if the agent was edited in the Copilot Studio UI."
+INFO "bot.configuration in Dataverse is always authoritative."
 $configJson = $bot.configuration
-if ($configJson -and $configJson.Length -gt 10) {
+if ($configJson.Length -gt 0) {
     $configJson | Set-Content (Join-Path $sampleDir "agent-config.json") -Encoding UTF8
-    try {
-        $cfgObj   = $configJson | ConvertFrom-Json
-        $instrLen = $cfgObj.agentSettings.instructions.segments[0].value.Length
-        $model    = $cfgObj.agentSettings.model.series
-        OK "sample\agent-config.json saved"
-        INFO "Model       : $model"
-        INFO "Instructions: $instrLen chars"
+    $instrLen = $cfg.agentSettings.instructions.segments[0].value.Length
+    OK "agent-config.json saved"
+    INFO "  Model       : $($cfg.agentSettings.model.series)"
+    INFO "  Instructions: $instrLen chars"
 
-        # Stale YAML check
-        $settingsPath = Join-Path $agentDir "settings.mcs.yml"
-        if (Test-Path $settingsPath) {
-            $yamlRaw  = Get-Content $settingsPath -Raw
-            $cfgStart = $cfgObj.agentSettings.instructions.segments[0].value.Substring(0, [Math]::Min(50,$instrLen))
-            if ($yamlRaw -notlike "*$cfgStart*") {
-                WARN "settings.mcs.yml instructions differ from bot.configuration."
-                WARN "The UI was used to edit instructions after the last pac push."
-                WARN "agent-config.json is authoritative — install.ps1 will PATCH it."
-            }
+    # Warn if YAML instructions differ from DV
+    $settingsPath = Join-Path $agentDir "settings.mcs.yml"
+    if (Test-Path $settingsPath) {
+        $yamlText   = Get-Content $settingsPath -Raw
+        $dvInstr50  = $cfg.agentSettings.instructions.segments[0].value.Substring(0, [Math]::Min(50, $instrLen))
+        if (-not $yamlText.Contains($dvInstr50)) {
+            WARN "settings.mcs.yml instructions differ from bot.configuration."
+            WARN "The agent was edited in the Copilot Studio UI after the last pac push."
+            WARN "agent-config.json is authoritative — install.ps1 will apply it."
         }
-    } catch {
-        OK "sample\agent-config.json saved (could not parse for preview)"
     }
 } else {
-    WARN "bot.configuration is empty — agent-config.json not saved"
+    WARN "bot.configuration is empty — instructions may not have been set on source agent"
 }
 
-# ── Step 5: Inventory botcomponents and flag gaps ─────────────────────────────
-Step "[5/6] Inventorying botcomponents..."
+# ── Step 4: Export binary skill assets ────────────────────────────────────────
+Step "Step 4 — Export binary skill assets (bic:bundle= skills)"
+$allComps = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotid_value eq '$BotId'&`$select=botcomponentid,name,componenttype,data" -Headers $dv).value
+$skillsWithAssets = $allComps | Where-Object { $_.data -like "*bic:bundle=*" }
 
-$comps = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotid_value eq '$BotId'&`$select=botcomponentid,name,componenttype,data" -Headers $headers).value
-$warnings = @()
-
-foreach ($c in $comps) {
-    switch ($c.componenttype) {
-        9 {
-            if ($c.data -like "*InlineAgentSkill*") {
-                OK "InlineAgentSkill : $($c.name) (in translations/*.mcs.yml)"
-            } elseif ($c.data -like "*bic:bundle=*") {
-                WARN "Skill-with-assets: $($c.name) — bundle blob NOT in YAML, needs post-install re-upload"
-                $warnings += "Skill '$($c.name)' has binary assets. Use path1-solution export/install for reliable transfer."
-            } elseif ($c.data -like "*TaskDialog*") {
-                INFO "Flow tool (TaskDialog): $($c.name)"
-            } elseif ($c.data -like "*ConnectorTool*" -or $c.data -like "*McpTool*") {
-                INFO "Connector/MCP tool: $($c.name)"
-            } elseif ($c.data -like "*ConnectedAgentTool*" -or $c.data -like "*childAgentId*") {
-                WARN "Connected agent: $($c.name) — target env must have child agent by same schema name"
-                $warnings += "Connected agent '$($c.name)' requires the child agent to exist in the target environment."
-            }
+INFO "Skills with assets: $($skillsWithAssets.Count)"
+$n = 0
+foreach ($skill in $skillsWithAssets) {
+    $skillDir = Join-Path $OutputDir "skills-with-assets\$($skill.name)"
+    New-Item -ItemType Directory -Force -Path $skillDir | Out-Null
+    $children = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotcomponentid_value eq '$($skill.botcomponentid)'&`$select=botcomponentid,name,filedata_name" -Headers $dv).value
+    foreach ($child in $children) {
+        $fileName = if ($child.filedata_name) { $child.filedata_name } else { $child.name -replace '^\./',''}
+        $filePath = Join-Path $skillDir $fileName
+        try {
+            $fileBytes = (Invoke-WebRequest -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($child.botcomponentid))/filedata" -Headers @{ Authorization="Bearer $token"; Accept="application/octet-stream" }).Content
+            [System.IO.File]::WriteAllBytes($filePath, $fileBytes)
+            OK "  $($skill.name)/$fileName ($($fileBytes.Length) bytes)"
+            $n++
+        } catch {
+            try {
+                $rec = Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents($($child.botcomponentid))?`$select=filedata" -Headers $dv
+                if ($rec.filedata) {
+                    [System.IO.File]::WriteAllBytes($filePath, [Convert]::FromBase64String($rec.filedata))
+                    OK "  $($skill.name)/$fileName (base64)"
+                    $n++
+                }
+            } catch { WARN "Could not download $fileName for '$($skill.name)'" }
         }
-        16 { INFO "URL knowledge: $($c.name)" }
-        19 { INFO "Eval test case: $($c.name)" }
     }
 }
+if ($n -eq 0 -and $skillsWithAssets.Count -eq 0) { INFO "No skills with assets — nothing to export" }
 
-# ── Step 6: Inventory flow GUIDs ──────────────────────────────────────────────
-Step "[6/6] Inventorying flow GUIDs (env-specific, install.ps1 will remap)..."
-
-$wfCount = 0
-Get-ChildItem (Join-Path $agentDir "translations") -Filter "*.mcs.yml" -ErrorAction SilentlyContinue | ForEach-Object {
-    $yml = Get-Content $_.FullName -Raw
-    if ($yml -match "kind: WorkflowTool" -and $yml -match "workflowId: ([a-f0-9\-]{36})") {
-        INFO "WorkflowTool '$($_.BaseName)' — workflowId: $($Matches[1]) (will be remapped)"
-        $wfCount++
+# ── Step 5: Component inventory ───────────────────────────────────────────────
+Step "Step 5 — Component inventory"
+Write-Host ""
+Write-Host "  Component inventory for '$AgentName':"
+$allComps | Group-Object componenttype | Sort-Object Name | ForEach-Object {
+    $typeName = switch ($_.Name) {
+        9  { "Tools / Skills" }
+        14 { "File assets" }
+        15 { "GPT config" }
+        19 { "Eval test cases" }
+        default { "Type $($_.Name)" }
     }
+    Write-Host "    $typeName : $($_.Count)"
 }
-Get-ChildItem (Join-Path $agentDir "actions") -Filter "*.mcs.yml" -ErrorAction SilentlyContinue | ForEach-Object {
-    $yml = Get-Content $_.FullName -Raw
-    if ($yml -match "kind: InvokeFlowTaskAction" -and $yml -match "flowId: ([a-f0-9\-]{36})") {
-        INFO "AgentFlow '$($_.BaseName)' — flowId: $($Matches[1]) (will be remapped)"
-        $wfCount++
-    }
-}
-if ($wfCount -eq 0) { OK "No flow GUIDs found — agent has no flow-backed tools" }
-else { OK "$wfCount flow tool(s) found — install.ps1 strips GUIDs before push and remaps after" }
+$wfCount = (Get-ChildItem (Join-Path $agentDir "workflows") -Directory -ErrorAction SilentlyContinue).Count
+Write-Host "    Workflows        : $wfCount"
+Write-Host "    Skills w/ assets : $($skillsWithAssets.Count)"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
-$yamlCount = (Get-ChildItem $agentDir -Filter "*.mcs.yml" -Recurse -ErrorAction SilentlyContinue).Count
 Write-Host ""
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  Export Complete"                           -ForegroundColor Cyan
-Write-Host "════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  YAML files         : $yamlCount"
-Write-Host "  agent-config.json  : $(if ((Test-Path (Join-Path $sampleDir 'agent-config.json'))) {'saved'} else {'MISSING'})"
-Write-Host "  Flow tools         : $wfCount (GUIDs captured, install.ps1 remaps them)"
-
-if ($warnings.Count -gt 0) {
-    Write-Host ""
-    Write-Host "  Warnings:" -ForegroundColor Yellow
-    $warnings | ForEach-Object { Write-Host "  ! $_" -ForegroundColor Yellow }
-}
-
+Write-Host "╔══════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║  Export Complete                         ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Edit YAML in VS Code, then run: path2-vscode\install.ps1"
+Write-Host "  sample/$AgentName/  : $yamlCount YAML files (edit in VS Code)"
+Write-Host "  agent-config.json   : $(if($configJson.Length -gt 0){'saved (authoritative)'}else{'MISSING'})"
+Write-Host "  skills-with-assets/ : $n binary file(s)"
 Write-Host ""
+Write-Host "  Edit YAML, then run:"
+Write-Host "    .\install.ps1 -TargetOrgUrl <url>" -ForegroundColor Cyan
