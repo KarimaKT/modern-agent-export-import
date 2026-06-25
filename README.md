@@ -38,52 +38,34 @@ This toolkit closes all four gaps with tested, scripted solutions.
 
 ---
 
-## Two paths
+## Get started
 
-### Path 1 — Solution ZIP (distribute a sample or move between orgs)
-
-```
-export.ps1 → {AgentName}-bundle.zip → share the file → install.ps1
-```
-
-**Best for:** sharing samples on GitHub, provisioning new environments, cross-tenant transfers.
-
+**To share an agent with someone** (as a ZIP file they can install):
 ```powershell
-# Export — produces MyAgent-bundle.zip
-.\path1-solution\export.ps1 `
-  -SourceOrgUrl  "https://yourorg.crm.dynamics.com" `
-  -AgentName     "My Agent" `
-  -BotId         "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
-  -SolutionName  "MyAgentSample" `
-  -PublisherName "MyPublisher"
-
-# Install (recipient runs this — accepts a ZIP or extracted folder)
-.\path1-solution\install.ps1 `
-  -BundleZip     ".\MyAgent-bundle.zip" `
-  -TargetOrgUrl  "https://targetorg.crm.dynamics.com"
+.\path1-solution\export.ps1 -SourceOrgUrl "https://yourorg.crm.dynamics.com" -AgentName "My Agent" -BotId "your-bot-guid"
+# → produces MyAgent-bundle.zip. Share that file.
 ```
 
-### Path 2 — VS Code developer workflow (iterate in source control)
-
-```
-export.ps1 → YAML files → edit in VS Code → install.ps1 → deploy
-```
-
-**Best for:** iterating on agent logic, PR-based review, multi-environment CI/CD pipelines.
-
+**To install an agent from a bundle ZIP:**
 ```powershell
-# Export — clones agent to YAML for editing
-.\path2-vscode\export.ps1 `
-  -SourceOrgUrl  "https://yourorg.crm.dynamics.com" `
-  -AgentName     "My Agent" `
-  -BotId         "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-
-# Install — deploys YAML to target env
-.\path2-vscode\install.ps1 `
-  -TargetOrgUrl    "https://targetorg.crm.dynamics.com" `
-  -AgentName       "My Agent" `
-  -AgentSchemaName "publisher_MyAgent_xxxxx"
+.\path1-solution\install.ps1 -BundleZip ".\MyAgent-bundle.zip" -TargetOrgUrl "https://targetorg.crm.dynamics.com"
+# → agent appears in Copilot Studio. Wire connections in PPAC when prompted.
 ```
+
+**To edit an agent in VS Code and deploy changes:**
+```powershell
+# 1. Clone to YAML
+.\path2-vscode\export.ps1 -SourceOrgUrl "https://yourorg.crm.dynamics.com" -AgentName "My Agent" -BotId "your-bot-guid"
+# → editable YAML files appear under sample/
+
+# 2. Edit YAML files in VS Code (settings.mcs.yml, translations/, workflows/)
+
+# 3. Deploy to any environment
+.\path2-vscode\install.ps1 -TargetOrgUrl "https://targetorg.crm.dynamics.com" -AgentName "My Agent" -AgentSchemaName "publisher_MyAgent_xxxxx"
+```
+
+**Where to find your BotId:** Copilot Studio → open your agent → the URL contains the bot GUID:
+`https://copilotstudio.microsoft.com/environments/{envId}/agents/{BotId}`
 
 ---
 
