@@ -353,7 +353,53 @@ before deciding whether this toolkit is still needed for your workflow.
 
 ---
 
-## 12. Official pac CLI gap assessment (pac 2.8.1, June 2026)
+## 12. Complete export and import task breakdown
+
+This table covers every task required to export or import a cliagent-* agent,
+split by path. For each task: what is needed, what the default tools do, what
+breaks, and what this toolkit does instead.
+
+### distribute/ path — export tasks
+
+| Task | What is needed | Default pac CLI behavior | What this toolkit does |
+|------|---------------|--------------------------|------------------------|
+| **Identify all agent components** | Walk the full component graph: bot record, all botcomponents (tools, skills, knowledge, eval cases, file children), flows, connection references | No command does this — `pac copilot clone` walks YAML but not solution membership; `pac solution export` of a named solution misses anything added via the CS UI (always lands in Default Solution) | `distribute/export.ps1` queries DV for all botcomponents of the agent and their flow/connref dependencies |
+| **Add components to a solution** | All components must be in the same solution before export, or they will be missing from the ZIP | `AddRequiredComponents=true` exists but pulls in foreign components from other solutions | Surgical `AddSolutionComponent` per component with `AddRequiredComponents=false` — only this agent's components |
+| **Export solution ZIP** | A Dataverse solution ZIP containing all agent content | `pac solution export` works once all components are in the solution | Calls `pac solution export` after surgical add |
+| **Export skill binary assets** | SKILL.md and Python scripts from type-14 file children via `/botcomponents({id})/filedata/$value` | Not captured by `pac solution export` or any pac command | Downloads each file via DV file download endpoint |
+| **Write manifest.json** | Inventory of skill names, connector names, export metadata so install.ps1 knows what to do | No pac mechanism | Written by export.ps1; read by install.ps1 |
+
+### distribute/ path — install tasks
+
+| Task | What is needed | Default pac CLI behavior | What this toolkit does |
+|------|---------------|--------------------------|------------------------|
+| **Import solution** | `pac solution import` restores: bot record, bot.configuration, all botcomponents, flows (GUIDs preserved), connection references (empty), knowledge, eval cases | Works correctly. This is the core of the distribute path. | Calls `pac solution import` — no workaround needed |
+| **Wire connections** | Each ConnectorTool flow has connection references that need a real connection assigned | Platform behavior — expected one-time manual step per environment | Script tells user which connectors to wire in PPAC |
+| **Handle ConnectedAgentTool** | The referenced child agent must exist in target by the same schema name | No pac mechanism | Script documents this requirement; no automation possible |
+| **Handle skills with Python/code assets** | After import, the skill's bic:bundle= token references Azure blob storage in the source env — blob does not exist in target. CS stores the bundle in Azure via a server-side process triggered only by ZIP upload through its UI. There is no public API for this process. | No pac mechanism | Script detects broken skills, rebuilds the ZIP from exported assets, pauses and requires the user to re-upload via CS UI — the only path that triggers the server-side bundle creation |
+
+### develop/ path — export tasks
+
+| Task | What is needed | Default pac CLI behavior | What this toolkit does |
+|------|---------------|--------------------------|------------------------|
+| **Clone agent to YAML** | All tool/skill/knowledge/flow definitions as editable YAML files | `pac copilot clone` — works correctly, produces complete YAML | Calls `pac copilot clone` |
+| **Export bot.configuration** | Authoritative instructions, model, AI settings — these are in DV, not in the cloned YAML (YAML can be stale if agent was edited in CS UI) | Not captured by `pac copilot clone` | Exports via `GET /bots({id})` selecting the configuration field |
+| **Export skill binary assets** | SKILL.md and Python scripts from type-14 file children | Not captured by `pac copilot clone` | Downloads each file via DV file download endpoint |
+
+### develop/ path — install tasks
+
+| Task | What is needed | Default pac CLI behavior | What this toolkit does |
+|------|---------------|--------------------------|------------------------|
+| **Pre-create the bot in target** | `pac copilot push` requires the bot to pre-exist — it cannot create a new bot | Fails with "Entity 'bot' Does Not Exist" | Creates bot via `POST /api/data/v9.2/bots` |
+| **Clone empty target bot as workspace** | `pac copilot push` requires the workspace to be cloned from the TARGET environment — source workspace causes crash (botdefinition.json mismatch) | Not documented; discovered by testing | Clones the empty target bot immediately after creation |
+| **Strip source flow GUIDs** | Flow tool YAML embeds source-env-specific GUIDs (workflowId, flowId) that don't exist in target | No mechanism — push fails with "Entity 'Workflow' Does Not Exist" | Strips GUIDs before first push |
+| **First pac push** | Deploys all YAML: tools, skills, knowledge, connection references | `pac copilot push` — works once bot exists and workspace is from target | Calls `pac copilot push` |
+| **Apply authoritative bot.configuration** | pac push writes settings.mcs.yml to bot.configuration, but if the agent was edited in the CS UI the YAML is stale. Even if current, apply agent-config.json to ensure model/AI settings are correct | pac push does write bot.configuration from settings.mcs.yml — but may overwrite with stale content | `PATCH /bots({id})` with agent-config.json content after push |
+| **Create flows in target** | Target environment needs fresh workflow records with new GUIDs | No pac mechanism | `POST /api/data/v9.2/workflows` for each flow using exported workflow.json |
+| **Remap flow GUIDs + second push** | YAML needs the new target GUIDs; second push links tools to flows | No pac mechanism | Patches YAML with new GUIDs, second `pac copilot push` |
+| **Handle skills with Python/code assets** | Same problem as distribute/ — bic:bundle= token is env-specific | No pac mechanism | Same: detect broken skills, rebuild ZIP, require manual CS UI re-upload |
+
+## 13. Official pac CLI gap assessment (pac 2.8.1, June 2026)
 
 This is a comparison between pac CLI stable and what this toolkit adds.
 All findings are from: the official pac.doc.json, live testing, and open GitHub issues.
@@ -388,7 +434,7 @@ Unsupported directory: workflows/
 ```
 
 This means pac copilot pack **cannot be used for cliagent-1.0.0 agents** as of 2.8.1.
-Our path1-solution/export.ps1 (using pac solution export with surgical AddSolutionComponent)
+Our `distribute/export.ps1` (using pac solution export with surgical AddSolutionComponent)
 is the only working pack path for these agents.
 
 ### pac copilot pull — crashes with ArgumentOutOfRangeException

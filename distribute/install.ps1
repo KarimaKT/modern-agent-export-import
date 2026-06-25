@@ -302,7 +302,7 @@ Write-Host "    [x] agent.zip imported via pac solution import" -ForegroundColor
 Write-Host "    [x] Bot configuration, flows, tools, knowledge, eval cases restored by solution" -ForegroundColor Green
 
 if ($skillsWithAssets.Count -gt 0) {
-    Write-Host "    [x] Skills-with-assets repair attempted for $($skillsWithAssets.Count) skill(s)" -ForegroundColor Green
+    Write-Host "    [!] Skills-with-assets: manual upload required — see instructions above" -ForegroundColor Yellow
 }
 else {
     Write-Host "    [-] No skills-with-assets to repair" -ForegroundColor DarkGray

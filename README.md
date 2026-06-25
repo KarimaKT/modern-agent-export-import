@@ -33,9 +33,9 @@ This matrix applies to **both paths**. Check it before using either workflow on 
 | Agent instructions + model (bot.configuration) | ✅ | ✅ | Authoritative version always exported and applied on import |
 | ConnectorTools (standard MS connectors) | ✅ | ✅ | Connection wiring is one manual step per env — expected platform behavior |
 | WorkflowTool / TaskDialog (Agent Flows) | ✅ | ✅ | distribute/: GUIDs preserved; develop/: remapped automatically |
-| InlineAgentSkill (markdown-only skills) | ✅ | ✅ | Full round-trip, no extra steps |
-| Skills with Python/code assets | ⚠️ | ⚠️ | Instructions restored automatically. Python execution needs a manual ZIP re-upload in CS UI after import |
-| InlineAgentSkill (instructions only, no code) | ✅ | ✅ | Fully automated |
+| InlineAgentSkill (markdown-only skill) | ✅ | ✅ | Full round-trip, no extra steps |
+| Skill with Python/code assets — instructions | ✅ | ✅ | Exported from SKILL.md and re-applied on import |
+| Skill with Python/code assets — code execution | ⚠️ manual | ⚠️ manual | Requires re-upload via CS UI (see note below) |
 | URL knowledge sources | ✅ | ✅ | Full round-trip |
 | File knowledge (PDF, DOCX) | ✅ | ❌ | Binary preserved in solution ZIP; not captured by pac clone |
 | Evaluation test cases | ✅ | ❌ | In solution ZIP; not captured by pac clone |
@@ -45,7 +45,10 @@ This matrix applies to **both paths**. Check it before using either workflow on 
 | **Connection refs (new 2026 CS UI)** | ❌ | ❌ | Reports: new UI creates connection refs without backing connector record |
 | Classic agents (default-2.x.x template) | ❌ | ❌ | Different architecture — use standard pac solution or pac copilot push |
 
----
+> **Why skills with code require a manual upload step:**
+> When you upload a skill ZIP through the Copilot Studio UI, CS runs a server-side process that stores the binary assets (Python scripts etc.) in Azure blob storage and generates an environment-specific bundle reference token. There is no public API for this process — it happens inside CS's own backend. Without this token, the code assets are unreachable at runtime. The skill ZIP is exported and ready in the bundle; you just need to trigger that server-side process by uploading it once through the CS UI. The install script pauses and opens the browser for you at the right point. This is a one-time step per environment.
+
+
 
 ## Get started
 
