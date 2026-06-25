@@ -1,3 +1,6 @@
+# Private session context (contains env URLs and bot IDs — keep local only)
+CONTEXT.md
+
 # Temp workspaces and build artifacts
 _workspace_*/
 _clone_*/

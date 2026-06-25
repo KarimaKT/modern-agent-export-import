@@ -184,12 +184,18 @@ LEARNINGS.md    ← all tested findings with evidence (no assumptions)
 
 ## Tested on
 
-Tested end-to-end against a Modern Copilot Studio agent with:
-- Template: `cliagent-1.0.0`
+The **pac solution import component matrix** (path 1 core behavior) was verified end-to-end
+against a real Modern Copilot Studio agent (`cliagent-1.0.0`) with:
 - Tools: ConnectorTool, WorkflowTool (with Power Automate flows)
 - Skills: InlineAgentSkill, skill-with-assets (ZIP + Python script)
 - Knowledge: URL knowledge source, uploaded PDF
 - Evaluation test cases
 - Connection references
 
-10/10 test cases passed for solution import. See `LEARNINGS.md` for full test details.
+All component types in the matrix above were individually confirmed. See `LEARNINGS.md`
+for full test details.
+
+> **Note on end-to-end scripts:** The `export.ps1 → install.ps1 -BundleZip` pipeline and
+> the path 2 VS Code cycle have been written and syntax-validated, but have not been run
+> as a complete end-to-end automated test. The individual operations they perform have been
+> tested manually and confirmed correct. Contributions with full end-to-end test runs welcome.

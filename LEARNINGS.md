@@ -1,7 +1,7 @@
 # Definitive Learnings: Modern Copilot Studio Agent ALM
 
-*Authored from hands-on testing, June 24 2026.*
-*Tests run against: Fabric Analyst (cliagent-1.0.0) in CDX (orgea8005ed) → Zava PP (org07697283)*
+*Authored from hands-on testing, June 2026.*
+*Tests run against a real Modern Copilot Studio agent (`cliagent-1.0.0`) exported from one environment and imported into another.*
 
 ---
 
@@ -204,8 +204,8 @@ For sample distribution: automated fix is sufficient — instructions work corre
 
 ## 10. File knowledge uploads (PDFs, docs) — WORKS through solution import
 
-TESTED: Uploaded test-knowledge.pdf to CleanBuildAgent via CS UI, added to solution,
-exported, imported to target env. Result: PDF binary (549 bytes) fully preserved.
+TESTED: Uploaded a PDF file to an agent via CS UI, added to solution,
+exported, imported to target env. Result: PDF binary fully preserved.
 
 How it works:
 - CS UI calls POST/PUT to powervamg.us-il301.gateway.prod.island.powerapps.com/api/botmanagement/v1/
