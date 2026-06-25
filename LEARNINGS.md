@@ -272,22 +272,26 @@ McpTool definitions export and import correctly. The MCP server itself must be r
 and reachable at the same URL in the target environment. Local servers with dev-tunnel
 URLs break on import — use a stable hosted URL or re-wire after import.
 
-### pac CLI alpha — native Modern agent support
+### pac CLI alpha feed — verified June 25, 2026
 
-The pac CLI team has been reported to be adding native `cliagent-1.0.0` support. Alpha
-builds are at: https://dev.azure.com/msazure/One/_artifacts/feed/CAP_ISVExp_Tools_Daily
-(requires authentication — not publicly inspectable).
+The CAP_ISVExp_Tools_Daily feed at https://dev.azure.com/msazure/One/_artifacts/feed/CAP_ISVExp_Tools_Daily
+contains `Microsoft.PowerApps.CLI.Tool 2.9.1-alpha-26062500` (built June 24, 2026).
 
-Based on the public NuGet changelog (versions 1.35 through 2.8.1), **no releases have
-shipped fixes for bot.configuration, flow GUIDs, skills-with-assets, or solution
-membership** for cliagent agents. Issue #1259 (extract-template missing configuration,
-open 10+ months) and issue #1306 (create ignores kickStartTemplate JSON, open) confirm
-these gaps remain unresolved in stable. Test the alpha if you have access before
-committing to this toolkit for the VS Code path.
+**This is the standard pac CLI pre-release pipeline — not a separate Modern agent tool.**
+
+Release notes for 2.9.1-alpha:
+- `pac admin query` (new Resource Query command)
+- Microsoft.Identity.Client updated to 4.85.0
+
+**No mention of cliagent-1.0.0, Modern agents, bot.configuration, or copilot ALM improvements.**
+The alpha confirms there is no imminent platform fix coming for the gaps this toolkit addresses.
+The feed appears to be a standard pre-release promotion channel for the regular pac CLI,
+not a dedicated modern-agent build. Any native cliagent support from the pac team is
+planned/future work, not something available today (June 2026).
 
 ---
 
-## 12. Official pac CLI gap assessment (pac 2.8.1, June 2026)
+## 12. Official pac CLI gap assessment (pac 2.8.1–2.9.1-alpha, June 2026)
 
 This is the definitive comparison between pac CLI stable and what this toolkit adds.
 All findings are from: the official pac.doc.json, live testing, and open GitHub issues.
