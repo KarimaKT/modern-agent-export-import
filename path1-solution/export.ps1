@@ -90,6 +90,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $OrgNoTrail = $SourceOrgUrl.TrimEnd("/")
+# Resolve to absolute path — [System.IO.File]::WriteAllBytes requires absolute paths
+$OutputDir  = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
 
 # Resolve pac.exe
 if (-not $PacExe) {
