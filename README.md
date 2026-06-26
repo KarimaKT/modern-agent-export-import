@@ -21,76 +21,21 @@ Two workflows:
 
 The **develop/** path also benefits from the [Power Platform Tools for VS Code](https://marketplace.visualstudio.com/items?itemName=microsoft-IsvExpTools.powerplatform-vscode) extension for YAML schema hints.
 
----
-
-## develop/ — what you can change in VS Code vs. what needs the Copilot Studio UI
-
-This is the most important thing to understand before editing an agent. The boundary is **wording/behaviour vs. structure**, and the scripts state it at every step.
-
-| You want to… | Where | How it deploys |
-|---|---|---|
-| Change the agent's **instructions** (system prompt, rules, persona) | ✅ **VS Code** — edit `sample/<Agent>.instructions.md` | `develop/install.ps1` → Dataverse `bot.configuration` |
-| Change the **model** or **AI settings** (content moderation, model knowledge…) | ✅ **VS Code** — edit `sample/agent-config.json` | `develop/install.ps1` → Dataverse `bot.configuration` |
-| Edit an **inline (markdown) skill's** content | ✅ **VS Code** — edit `sample/<Agent>/translations/*.skill.*.mcs.yml` | `develop/install.ps1` → component `data` patch |
-| Reword a **tool / knowledge description** | ✅ **VS Code** — edit the matching `translations/` or `knowledge/` file | `develop/install.ps1` → component `data` patch |
-| **Add / remove** a tool, connector, or flow | ⚠️ **Copilot Studio UI** (needs connection wiring / Power Automate) | Build it in CS, then re-run `develop/export.ps1` |
-| **Add** a skill that runs Python / code | ⚠️ **Copilot Studio UI** (server-side code-bundle upload — no API) | Upload the skill ZIP in CS (the script hands you the ZIP) |
-| **Add** file knowledge (PDF, DOCX) | ⚠️ **Copilot Studio UI** (binary upload gateway) | Upload in CS, then re-export |
-| **Publish** changes to go live on channels | ⚠️ **Copilot Studio UI** — one click ( `pac copilot publish` crashes for cliagent-*) | Click **Publish**; the script opens the agent for you |
-
-**Rule of thumb:** editing the *words and behaviour* of things that already exist → VS Code. Adding *new structure* or anything needing a connection or a binary upload → Copilot Studio UI, then re-export. Every deploy ends with a one-click **Publish**.
-
-The cloned YAML in `sample/<Agent>/` is always useful for reading, diffing, and code review — even for the structural parts you can't push from the CLI.
+**Identify your agent.** Both paths need your agent's **BotId** — the GUID in the Copilot Studio URL `https://copilotstudio.microsoft.com/environments/{envId}/agents/{BotId}`. Your agent must use the `cliagent-*` template (Classic `default-2.x.x` agents are not supported).
 
 ---
 
-## Component support matrix
+## distribute/ — share an agent as a ZIP
 
-| Component | distribute/ | develop/ | Notes |
-|-----------|:-----------:|:--------:|-------|
-| Agent instructions + model (bot.configuration) | ✅ | ✅ | Editable + deployed (develop/: from instructions.md / agent-config.json) |
-| ConnectorTools (standard MS connectors) | ✅ | ✅ | Structure via solution import; connection wiring is one manual step per env |
-| WorkflowTool / TaskDialog (Agent Flows) | ✅ | ✅ | Carried in the solution bundle (GUIDs preserved) |
-| InlineAgentSkill (markdown skill) | ✅ | ✅ | Full round-trip; **content editable in VS Code** and deployed |
-| Tool / knowledge descriptions | ✅ | ✅ | **Editable in VS Code** and deployed (component data patch) |
-| Skill with Python/code assets | ⚠️ manual | ⚠️ manual | Re-upload the skill ZIP via the CS UI (one step per env) — see note below |
-| URL knowledge sources | ✅ | ✅ | Full round-trip |
-| File knowledge (PDF, DOCX) | ✅ | ✅ | Carried in the solution bundle (binary preserved) |
-| Evaluation test cases | ✅ | ✅ | Carried in the solution bundle |
-| ConnectedAgentTool | ✅ | ✅ | Child agent must exist in target by the same schema name |
-| Add **new** tools / connectors / flows from local YAML | ❌ | ❌ | Build in the CS UI, then re-export (no reliable CLI push for cliagent-*) |
-| **Custom connectors with inline code** | ❌ | ❌ | Azure Functions provisioning is unreliable — platform issue |
-| **MCP server tools** | ⚠️ | ⚠️ | Tool definition transfers; server must be reachable at the same URL in target |
-| Classic agents (default-2.x.x template) | ❌ | ❌ | Different architecture — use standard pac solution tooling |
-
-> **Why skills with code require a manual upload step:**
-> When you upload a skill ZIP through the Copilot Studio UI, CS runs a server-side process that stores the binary assets (Python scripts etc.) in Azure blob storage and generates an environment-specific bundle reference token. After import, the skill's `data` field is only a `bic:bundle=` pointer to the **source** environment's blob — so until you re-upload, the model can read **neither the instructions nor the code** (the pointer 404s in the target). There is no public API for the upload process — it happens inside CS's own backend. The install script detects the broken skill, rebuilds the ZIP, and points you to the exact place to upload it. This is a one-time step per environment.
->
-> The scripts deliberately do **not** silently rewrite the skill to inline markdown. That would make the skill *look* fixed while it still cannot execute its code — a silent degradation. Honest-broken-until-uploaded is the chosen behavior.
-
-
-
-
-## Get started
-
-### Identify your agent
-
-Both scripts require your agent's **BotId** — the GUID in the Copilot Studio URL:  
-`https://copilotstudio.microsoft.com/environments/{envId}/agents/{BotId}`
-
-Your agent must use the `cliagent-*` template (visible in PPAC → agent record). Classic agents (`default-2.x.x`) are not supported.
-
----
-
-### distribute/ — Share an agent as a ZIP
+The primary workflow: package an agent into a single bundle and install it into any environment.
 
 **Export** (run once to produce a shareable bundle):
 ```powershell
 .\distribute\export.ps1 `
-  -SourceOrgUrl "https://yourorg.crm.dynamics.com" `
-  -BotId        "your-bot-guid" `
-  -SolutionName "MyAgentSample" `
-  -PublisherName "YourPublisher"
+  -SourceOrgUrl  "https://yourorg.crm.dynamics.com" `
+  -BotId         "your-bot-guid" `
+  -SolutionName  "MyAgentSample" `
+  -PublisherName "myprefix"          # publisher unique name OR customization prefix
 # Produces: MyAgent-bundle.zip
 ```
 
@@ -99,14 +44,35 @@ Your agent must use the `cliagent-*` template (visible in PPAC → agent record)
 .\distribute\install.ps1 `
   -BundleZip    ".\MyAgent-bundle.zip" `
   -TargetOrgUrl "https://targetorg.crm.dynamics.com"
-# Agent appears in Copilot Studio. Wire connections in PPAC when prompted.
+# Agent appears in Copilot Studio. The script guides any connection wiring and skill upload.
 ```
 
-After install: wire connections for any ConnectorTool flows in PPAC → Power Automate.
+After install, two one-time-per-environment steps (the script tells you exactly what to do): wire connections for any connector flows in Power Automate, and re-upload any skills that run Python/code via the CS UI.
+
+### What transfers — component support matrix
+
+| Component | Transfers | Notes |
+|-----------|:---------:|-------|
+| Agent instructions + model (bot.configuration) | ✅ | Full round-trip |
+| ConnectorTools (standard MS connectors) | ✅ | Connection wiring is one manual step per env |
+| WorkflowTool / TaskDialog (Agent Flows) | ✅ | Carried in the bundle (flow GUIDs preserved) |
+| InlineAgentSkill (markdown skill) | ✅ | Full round-trip |
+| URL knowledge sources | ✅ | Full round-trip |
+| File knowledge (PDF, DOCX) | ✅ | Binary preserved in the bundle |
+| Evaluation test cases | ✅ | Carried in the bundle |
+| ConnectedAgentTool | ✅ | Child agent must exist in target by the same schema name |
+| Skill with Python/code assets | ⚠️ manual | One-time ZIP re-upload via the CS UI (see note below) |
+| MCP server tools | ⚠️ | Definition transfers; server must be reachable at the same URL in target |
+| Custom connectors with inline code | ❌ | Azure Functions provisioning is unreliable — platform issue |
+| Classic agents (`default-2.x.x`) | ❌ | Different architecture — use standard pac solution tooling |
+
+> **Why skills with code need a one-time manual upload:** uploading a skill ZIP through the Copilot Studio UI triggers a server-side process that stores the Python/binary assets in Azure blob storage and mints an environment-specific bundle token. A transferred skill carries only a `bic:bundle=` pointer to the **source** environment's blob, which 404s in the target — so the model can read neither the instructions nor the code until you re-upload. There is no public API for this; the install script detects the broken skill, rebuilds the ZIP, and points you to where to upload it. The scripts deliberately do **not** silently rewrite the skill to inline markdown (that would look fixed while the code still can't run). See [LEARNINGS.md](LEARNINGS.md) for details.
 
 ---
 
-### develop/ — Clone an agent, edit in VS Code, redeploy
+## develop/ — edit an agent in VS Code, redeploy
+
+The development workflow: clone an agent to editable files, change it locally under source control, and redeploy reliably (via solution import, not `pac copilot push`).
 
 **Export** (clone to editable files + build a deployable bundle):
 ```powershell
@@ -115,7 +81,7 @@ After install: wire connections for any ConnectorTool flows in PPAC → Power Au
   -BotId         "your-bot-guid" `
   -AgentName     "My Agent" `
   -SolutionName  "MyAgentSample" `
-  -PublisherName "myprefix"          # publisher unique name OR customization prefix
+  -PublisherName "myprefix"
 # Produces:
 #   sample/My Agent/                 editable YAML (read / diff / review)
 #   sample/My Agent.instructions.md  the instructions — edit this to change behaviour
@@ -123,21 +89,31 @@ After install: wire connections for any ConnectorTool flows in PPAC → Power Au
 #   My Agent-bundle.zip              the deployable artifact
 ```
 
-**Edit** (see the VS Code vs UI table above):
-- `sample/My Agent.instructions.md` — instructions (deploys)
-- `sample/agent-config.json` — model + AI settings (deploys)
-- `sample/My Agent/translations/*.skill.*.mcs.yml` — inline skill content (deploys)
-
-**Deploy** to any environment:
+**Edit, then deploy:**
 ```powershell
 .\develop\install.ps1 `
-  -BundleZip     ".\My Agent-bundle.zip" `
-  -TargetOrgUrl  "https://targetorg.crm.dynamics.com"
+  -BundleZip    ".\My Agent-bundle.zip" `
+  -TargetOrgUrl "https://targetorg.crm.dynamics.com"
 # Solution import (full structure) + applies your instruction/skill edits via Dataverse.
-# No pac push. Ends by opening the agent for the one-click Publish.
+# Ends by opening the agent for the one-click Publish.
 ```
 
-After deploy: wire any connector flows in Power Automate (one-time per env), then **Publish** in Copilot Studio.
+### What you change in VS Code vs. in the Copilot Studio UI
+
+The boundary is **wording/behaviour vs. structure** — the scripts state it at every step.
+
+| You want to… | Where | How it deploys |
+|---|---|---|
+| Change the agent's **instructions** (system prompt, rules, persona) | ✅ **VS Code** — `sample/<Agent>.instructions.md` | `develop/install.ps1` → `bot.configuration` |
+| Change the **model** or **AI settings** | ✅ **VS Code** — `sample/agent-config.json` | `develop/install.ps1` → `bot.configuration` |
+| Edit an **inline (markdown) skill's** content | ✅ **VS Code** — `sample/<Agent>/translations/*.skill.*.mcs.yml` | `develop/install.ps1` → component `data` patch |
+| Reword a **tool / knowledge description** | ✅ **VS Code** — matching `translations/` or `knowledge/` file | `develop/install.ps1` → component `data` patch |
+| **Add / remove** a tool, connector, or flow | ⚠️ **Copilot Studio UI** | Build it in CS, then re-run `develop/export.ps1` |
+| **Add** a skill that runs Python / code | ⚠️ **Copilot Studio UI** (code-bundle upload) | Upload the skill ZIP in CS (the script hands you the ZIP) |
+| **Add** file knowledge (PDF, DOCX) | ⚠️ **Copilot Studio UI** (binary upload) | Upload in CS, then re-export |
+| **Publish** changes to go live | ⚠️ **Copilot Studio UI** — one click | Click **Publish**; the script opens the agent for you |
+
+**Rule of thumb:** editing the *words and behaviour* of things that already exist → VS Code. Adding *new structure*, or anything needing a connection or binary upload → Copilot Studio UI, then re-export. Every deploy ends with a one-click **Publish** (`pac copilot publish` crashes for cliagent-*). The cloned YAML in `sample/<Agent>/` is always useful for reading, diffing, and code review — even for structural parts you can't push from the CLI.
 
 ---
 
@@ -159,4 +135,4 @@ SECURITY.md / SUPPORT.md / CODE_OF_CONDUCT.md
 
 ---
 
-See [LEARNINGS.md](LEARNINGS.md) for technical details: the reliable-vs-unreliable pac commands, the Default Solution membership problem, the solutioncomponent enum trap, and skills-with-assets.
+See [LEARNINGS.md](LEARNINGS.md) for the technical detail behind all of this: the reliable-vs-unreliable pac commands, the Default Solution membership problem, the solutioncomponent enum trap, and the skills-with-assets mechanism.
