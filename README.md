@@ -127,13 +127,16 @@ This tool installs your agent as a Dataverse **solution** (the reliable way to m
 ## What's in this repo
 
 ```
-distribute/   export.ps1  →  package an agent into one bundle file
-              install.ps1 →  install a bundle into any environment
+distribute/   export.ps1     →  package an agent into one bundle file
+              export-all.ps1 →  package every modern agent in an environment (one bundle each)
+              install.ps1    →  install a bundle into any environment (supports -WhatIf preview)
 
 develop/      export.ps1  →  clone to editable files + build the bundle
-              install.ps1 →  install the bundle and apply your file edits
+              install.ps1 →  install the bundle and apply your file edits (supports -WhatIf)
 
 LEARNINGS.md        the tested findings and platform details
 SPEC.md             what the tool does and why (source of truth)
 CONTRIBUTING.md · SECURITY.md · SUPPORT.md · CODE_OF_CONDUCT.md
 ```
+
+> **Back up or migrate a whole environment:** `distribute\export-all.ps1 -SourceOrgUrl "..." -PublisherName "yourprefix"` exports every modern agent into its own bundle in one folder.

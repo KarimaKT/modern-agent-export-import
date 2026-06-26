@@ -326,7 +326,8 @@ INFO "Added bot (componenttype $resolvedBotType)"
 # Get all botcomponents (type 9 = tools/skills, type 14 = file assets, type 15 = gpt config)
 $allBotComps = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotid_value eq '$BotId'&`$select=botcomponentid,name,componenttype,data" -Headers $dv).value
 $flowIds = @()
-$addedBotComps = 0
+$addedBotComps = 0   # top-level botcomponents (excludes skill file children, which are subcomponents)
+$addedFileComps = 0  # skill file children, tracked separately (not all land as top-level solution components)
 foreach ($comp in $allBotComps) {
     Add-ToSolution $comp.botcomponentid $TYPE_BOTCOMP "botcomponent '$($comp.name)'" | Out-Null
     $addedBotComps++
@@ -336,18 +337,29 @@ foreach ($comp in $allBotComps) {
     # For skills with assets, also add type-14 children
     if ($comp.data -like "*bic:bundle=*") {
         $children = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/botcomponents?`$filter=_parentbotcomponentid_value eq '$($comp.botcomponentid)'&`$select=botcomponentid,filedata_name" -Headers $dv).value
-        foreach ($child in $children) { Add-ToSolution $child.botcomponentid $TYPE_BOTCOMP "skill file" | Out-Null; $addedBotComps++ }
+        foreach ($child in $children) { Add-ToSolution $child.botcomponentid $TYPE_BOTCOMP "skill file" | Out-Null; $addedFileComps++ }
         INFO "Skill with assets '$($comp.name)': added $($children.Count) file component(s)"
     }
 }
-OK "Added $addedBotComps botcomponents"
+OK "Added $addedBotComps botcomponents$(if ($addedFileComps) { " (+ $addedFileComps skill file(s))" })"
 
-# Add workflows (type 29)
+# Add workflows. A tool may reference a flow that was deleted from the environment — in that case
+# the workflow record doesn't exist, so skip it with a clear warning instead of aborting the whole
+# export. (We confirm existence first so a genuine 'component not found' isn't mistaken for an
+# enum/type problem.)
 $flowIds = $flowIds | Sort-Object -Unique
+$addedFlows = 0
+$liveFlowIds = @()
 foreach ($fid in $flowIds) {
+    $exists = $false
+    try { if (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/workflows($fid)?`$select=workflowid" -Headers $dv) { $exists = $true } } catch {}
+    if (-not $exists) { WARN "A tool references flow $fid, but that flow no longer exists in this environment — skipping it. (The tool will need its flow re-created or re-pointed after import.)"; continue }
     Add-ToSolution $fid $TYPE_FLOW "flow" | Out-Null
+    $liveFlowIds += $fid
+    $addedFlows++
 }
-OK "Added $($flowIds.Count) flow(s)"
+$flowIds = $liveFlowIds
+OK "Added $addedFlows flow(s)"
 
 # Add connection references (type 10132 / 10161) — enumerate from workflow definitions
 $connRefNames = @()
@@ -414,12 +426,13 @@ foreach ($ref in $tableRefs) {
 if ($seedTables.Count -eq 0) { INFO "No custom table dependencies to bundle" }
 
 # ── Verification net — fail LOUDLY if the surgical add did not land ────────────
-# This is the safety guarantee against the silent-empty-bundle failure mode. We count what is
-# actually in the solution and compare it to what we expected to add. Sub-components pulled in
-# automatically (DoNotIncludeSubcomponents=$false) mean the real count is >= the expected
-# minimum; if it is far short, a component-type mismatch silently failed and we must abort
-# BEFORE pac export produces a broken bundle.
-$expectedMin = 1 + $addedBotComps + $flowIds.Count + $addedConnRefs
+# Safety guarantee against the silent-empty-bundle failure mode (e.g. a component-type enum the
+# platform renumbered, where adds 404 and nothing lands). We count the solution's components and
+# require at least the bot + its top-level botcomponents + flows + connection refs.
+# NOTE: skill file children (type-14) are SUBcomponents and don't always appear as separate
+# top-level solution components, so they are intentionally excluded from this minimum to avoid a
+# false abort. The ZIP sanity check in Step 4 is the second guard.
+$expectedMin = 1 + $addedBotComps + $addedFlows + $addedConnRefs
 $actualCount = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/solutioncomponents?`$filter=_solutionid_value eq $solId&`$select=componenttype&`$count=true" -Headers $dv).'@odata.count'
 INFO "Solution component check: $actualCount present, expected at least $expectedMin"
 if ($actualCount -lt $expectedMin) {

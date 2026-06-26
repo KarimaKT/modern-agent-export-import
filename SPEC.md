@@ -125,6 +125,13 @@ tables, which skills need a one-time re-upload, which flows need activating, and
 then exits **without making any change** (no import, no writes). Lets a cautious maker see the
 impact first. **Decision:** D12.
 
+### 4.10 Export every agent in an environment (`distribute/export-all.ps1`)
+A convenience wrapper for backing up or migrating a whole environment. It lists every **modern**
+agent in the source environment and runs `distribute/export.ps1` for each, writing one bundle per
+agent into an output folder (one solution per agent, named from the agent). It continues past any
+single agent's failure and prints a summary (which bundles were produced, which agents failed and
+why). Skips classic agents with a note. **Decision:** D13.
+
 ### 4.6 (was 4.5) the rest of the path behaviors continue below
 
 
@@ -276,6 +283,8 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
   signed in, or the environment is unreachable, instead of a cryptic token error. (2026-06-26)
 - D12. **`-WhatIf` dry run** on both installs previews the full plan from the bundle and exits
   without changing the target. (2026-06-26)
+- D13. **`export-all.ps1`** exports every modern agent in an environment to its own bundle (whole-
+  environment backup/migration), continuing past per-agent failures with a summary. (2026-06-26)
 
 ---
 
@@ -317,7 +326,8 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
 - U3. ~~Optional `-WhatIf` dry run for both installs.~~ **RESOLVED (§4.9, D12):** `-WhatIf` prints
   exactly what the install would do (import, table seeding, skill re-uploads, flow activation,
   publish) from the bundle manifest, then exits without touching the target.
-- U4. Multi-agent export (whole environment).
+- U4. ~~Multi-agent export (whole environment).~~ **RESOLVED (§4.10, D13):** `distribute/export-all.ps1`
+  enumerates every modern agent in an environment and exports each to its own bundle, with a summary.
 - U5. Convert all **R** rows in §5 to **T** with purpose-built test agents.
 - U6. ~~Friendly first-run checks.~~ **RESOLVED (§4.8, D11):** all scripts run a preflight that gives
   clear setup guidance when the Azure CLI / Power Platform CLI is missing or not signed in, or the
@@ -371,3 +381,12 @@ path form differed (8.3 short name `KKANJI~1` vs long), breaking extraction — 
 `[IO.Path]::GetRelativePath`. Also fixed a StrictMode `.Count` crash from the PowerShell
 `$x = if(){@()}` empty-array-collapses-to-null gotcha. Real install of the same bundle confirmed
 extraction + seeding work.
+
+**U4 — export-all + robustness (2026-06-26):** `export-all.ps1` exported every modern agent in an
+environment (5/5), skipped classic agents, continued past failures, one bundle each. Testing across
+many real agents surfaced and fixed four export robustness issues: (1) the verification net
+over-counted skill file children (type-14 subcomponents) → false abort, now excluded; (2) an agent
+referencing a **deleted flow** hard-aborted with a misleading "type not valid" error → now warns and
+skips the missing flow; (3) two agents sharing a display name overwrote each other's bundle → each
+agent exports in an isolated work folder and collisions get a unique name (no data loss); (4)
+same-named agents shared one distribution solution (cross-contamination) → unique solution per agent.
