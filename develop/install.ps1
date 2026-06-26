@@ -127,15 +127,26 @@ $dvBase = "$OrgNoTrail/api/data/v9.2"
 Step "Step 1 -- Import agent structure (pac solution import)"
 INFO "Reliable path: imports bot, all tools/skills/flows/knowledge/eval cases. No pac push."
 & $PacExe auth select --index $AuthIndex | Out-Null
-& $PacExe solution import --path $zipPath --environment $OrgNoTrail 2>&1 | ForEach-Object { INFO $_ }
-if ($LASTEXITCODE -ne 0) { Write-Error "pac solution import failed" }
-OK "Solution imported"
+$importOut  = & $PacExe solution import --path $zipPath --environment $OrgNoTrail 2>&1
+$importExit = $LASTEXITCODE
+$importOut | ForEach-Object { INFO $_ }
+$importText = ($importOut | Out-String)
 
-# Locate the imported bot
+# Locate the imported bot. Do NOT trust pac's exit code (it can print a FAILURE and still return 0)
+# -- verify the bot actually landed in Dataverse.
 $bot = (Invoke-RestMethod -Uri "$dvBase/bots?`$filter=schemaname eq '$agentSchema'&`$select=botid,name" -Headers $dv).value | Select-Object -First 1
-if (-not $bot) { Write-Error "Imported bot not found (schema $agentSchema)" }
+if (($importExit -ne 0) -or ($importText -match 'cannot be imported|Missing dependenc|FAILURE') -or -not $bot) {
+    Write-Host ""
+    Write-Host "  SOLUTION IMPORT FAILED -- the agent was NOT installed." -ForegroundColor Red
+    if ($importText -match 'Missing dependenc|cannot be imported') {
+        Write-Host "  Cause: a dependency (often a Dataverse table or connector used by a flow) is" -ForegroundColor Yellow
+        Write-Host "  missing in the target. See the pac error above ('Required type=... schemaName=...')." -ForegroundColor Yellow
+        Write-Host "  Fix: create/import that dependency in the target first, then re-run." -ForegroundColor Yellow
+    }
+    Write-Error "Imported bot (schema '$agentSchema') not found in target. Aborting."
+}
 $botId = $bot.botid
-OK "Bot: $($bot.name) ($botId)"
+OK "Solution imported -- bot present: $($bot.name) ($botId)"
 
 # ── Step 2: Apply instruction / model / AI-settings edits (bot.configuration) ─
 Step "Step 2 -- Apply your instruction + model edits (bot.configuration)"

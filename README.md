@@ -72,7 +72,7 @@ Legend: ✅ transfers automatically · ⚠️ transfers, one manual step · ❌ 
 | ConnectorTools (standard MS connectors) | ✅ | Flow imports linked but off; wire a connection + turn on |
 | Agent flows (WorkflowTool / TaskDialog) | ✅ | Carried in the bundle, GUIDs preserved, tool→flow link intact |
 | Inline skills (markdown, incl. **inline** code) | ✅ | Full round-trip |
-| URL knowledge sources | ✅ | Full round-trip |
+| URL knowledge sources | ✅ | Full round-trip incl. the source's description (tested) |
 | File knowledge (PDF, DOCX) | ✅ | Binary preserved in the bundle |
 | Evaluation test cases | ✅ | Carried in the bundle |
 | ConnectedAgentTool † | ✅ | Child agent must already exist in target by the same schema name |
@@ -129,6 +129,7 @@ The boundary is **wording/behaviour vs. structure** — the scripts state it at 
 | Reword a **tool or skill description** | ✅ **VS Code** — the `description:` line in the matching `translations/` file | component `description` patch |
 | **Edit a ZIP-packaged skill's code** (`.py` files) | ⚠️ **Copilot Studio UI** | Re-upload the skill ZIP in CS (the script rebuilds it for you) |
 | **Add / remove** a tool, connector, or flow | ⚠️ **Copilot Studio UI** | Build it in CS, then re-run `develop/export.ps1` |
+| **Add or edit a knowledge source** (URL or its description) | ⚠️ **Copilot Studio UI** | Change it in CS, then re-export — it round-trips in the bundle |
 | **Add** a skill packaged as a code ZIP, or **file knowledge** (PDF/DOCX) | ⚠️ **Copilot Studio UI** (binary upload) | Upload in CS, then re-export |
 | **Publish** changes to go live | ⚠️ **Copilot Studio UI** — one click | Click **Publish**; the script opens the agent for you |
 

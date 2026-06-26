@@ -34,13 +34,26 @@ The following pac commands are **unreliable for cliagent-* and are NOT used to d
 | `pac copilot pack` | Crashes on cliagent workspace format. | Use solution export |
 | `pac copilot pull` | Crashes (`ArgumentOutOfRangeException`). | Use clone |
 
+**`pac solution import` can FAIL but still return exit code 0.** Tested: importing an agent whose
+flow depends on a Dataverse table missing in the target printed
+`Error: ... cannot be imported ... Missing dependencies ... Required type=1 schemaName=...` yet
+`$LASTEXITCODE` was 0 and the bot was never created. **Never trust the exit code** — both install
+scripts now scan the import output for failure markers AND verify the bot exists in Dataverse by
+schema name, failing loudly with the cause (and how to fix it) if either check fails. This is the
+single most important reliability guard in the install path: a silent "success" on a failed import
+is worse than a loud failure.
+
 **Consequence for the develop/ path UX (documented at runtime + in README):**
 - Editable in VS Code and deployed: instructions, model/AI settings, inline-skill content,
-  tool/knowledge descriptions (i.e. the *wording and behaviour* of existing components).
+  tool/skill descriptions (i.e. the *wording and behaviour* of existing components).
 - Requires the Copilot Studio UI, then re-export: adding/removing tools, connectors, flows;
-  skills with Python/code; file knowledge (i.e. *new structure* or anything needing a connection
-  or binary upload).
+  adding/editing knowledge sources; skills with code ZIPs; file knowledge (i.e. *new structure* or
+  anything needing a connection or binary upload). These all round-trip through the bundle.
 - Every deploy ends with a one-click **Publish** in CS (because `pac copilot publish` crashes).
+
+Knowledge sources (URL, type 16) round-trip through solution export/import with name, description,
+and configuration intact — **tested** by injecting a URL knowledge source with a marked description,
+exporting, importing to a second environment, and confirming all fields survived.
 
 `pac copilot clone` is still used by develop/export.ps1 — but only to produce **editable YAML for
 reading, diffing, and code review**, never as the deploy mechanism.

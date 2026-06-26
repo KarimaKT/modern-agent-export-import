@@ -169,10 +169,37 @@ INFO "Selecting pac auth index $AuthIndex"
 & $PacExe auth select --index $AuthIndex | Out-Null
 
 INFO "Running: pac solution import --path $zipPath --environment $OrgNoTrail"
-& $PacExe solution import --path $zipPath --environment $OrgNoTrail 2>&1 |
-    ForEach-Object { INFO $_ }
+$importOut = & $PacExe solution import --path $zipPath --environment $OrgNoTrail 2>&1
+$importExit = $LASTEXITCODE
+$importOut | ForEach-Object { INFO $_ }
 
-OK "pac solution import complete"
+# Do NOT trust pac's exit code: pac 2.8.1 can print "Error: ... cannot be imported ... missing
+# dependencies" and STILL return exit code 0. Detect failure from the output text AND verify the
+# bot actually landed in Dataverse. Either signal failing = hard stop.
+$importText = ($importOut | Out-String)
+$importFailed = ($importExit -ne 0) -or ($importText -match 'cannot be imported|Missing dependenc|FAILURE|^\s*Error:')
+
+INFO "Verifying the agent actually imported (querying Dataverse)..."
+$verToken = (az account get-access-token --resource $OrgNoTrail | ConvertFrom-Json).accessToken
+$verHdr   = @{ Authorization = "Bearer $verToken"; Accept = "application/json" }
+$verBot   = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots?`$filter=schemaname eq '$($manifest.agentSchema)'&`$select=botid,name" -Headers $verHdr).value | Select-Object -First 1
+
+if ($importFailed -or -not $verBot) {
+    Write-Host ""
+    Write-Host "  ===========================================================" -ForegroundColor Red
+    Write-Host "  SOLUTION IMPORT FAILED -- the agent was NOT installed." -ForegroundColor Red
+    Write-Host "  ===========================================================" -ForegroundColor Red
+    if ($importText -match 'Missing dependenc|cannot be imported') {
+        Write-Host "  Cause: the agent depends on something that does not exist in the target" -ForegroundColor Yellow
+        Write-Host "  environment (often a Dataverse table or connector a flow uses). The relevant" -ForegroundColor Yellow
+        Write-Host "  pac error is above -- look for 'Required type=... schemaName=...'." -ForegroundColor Yellow
+        Write-Host "  Fix: create/import that dependency in the target first, then re-run install." -ForegroundColor Yellow
+    } else {
+        Write-Host "  See the pac output above for the specific error." -ForegroundColor Yellow
+    }
+    Write-Error "pac solution import did not produce the agent (schema '$($manifest.agentSchema)') in the target. Aborting."
+}
+OK "pac solution import verified -- bot present: $($verBot.name) ($($verBot.botid))"
 
 # ---------------------------------------------------------------------------
 # Step 2 — Fix skills with assets
