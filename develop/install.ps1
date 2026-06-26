@@ -145,13 +145,22 @@ if (Test-Path $configPath) {
     $cfgJson = Get-Content $configPath -Raw
     $cfgObj  = $cfgJson | ConvertFrom-Json
     # instructions.md is the friendly edit surface — if present, it wins over agent-config.json.
+    # SAFETY: instructions.md is a single markdown blob. Applying it is only sound when the agent
+    # has exactly one StaticSegment (the common case). If the agent uses multiple or dynamic
+    # instruction segments, we do NOT collapse them (that would drop dynamic segments) — we keep
+    # agent-config.json's exact structure and tell the user to edit it instead.
     if (Test-Path $instrPath) {
         $md = (Get-Content $instrPath -Raw) -replace '(?m)^\s*<!--.*?-->\s*$', ''   # drop helper comment lines
         $md = $md.Trim()
-        if ($md -and $cfgObj.agentSettings.instructions.segments.Count -gt 0) {
+        $segs = @($cfgObj.agentSettings.instructions.segments)
+        $singleStatic = ($segs.Count -eq 1) -and ($segs[0].'$kind' -eq 'StaticSegment')
+        if ($md -and $singleStatic) {
             $cfgObj.agentSettings.instructions.segments[0].value = $md
             $cfgJson = $cfgObj | ConvertTo-Json -Depth 50
             INFO "Instructions taken from $AgentName.instructions.md ($($md.Length) chars)"
+        } elseif ($md) {
+            WARN "Agent has $($segs.Count) instruction segment(s)/dynamic content -- not applying instructions.md."
+            WARN "Edit instructions inside agent-config.json instead to preserve segment structure."
         }
     }
     # bot.configuration is a STRING field in Dataverse — ConvertTo-Json -Depth 1 string-encodes it.
@@ -162,32 +171,48 @@ if (Test-Path $configPath) {
     INFO "No agent-config.json -- keeping instructions/model from the imported bundle"
 }
 
-# ── Step 3: Apply inline-skill + description edits (existing component data) ──
-Step "Step 3 -- Apply your skill / description edits (component data)"
+# ── Step 3: Apply inline-skill content + tool/knowledge description edits ─────
+Step "Step 3 -- Apply your skill content + description edits"
+# Two safe, tested edit surfaces on EXISTING components:
+#   • inline-skill markdown  -> the component 'data' field (kind: InlineAgentSkill with inline content)
+#   • tool/skill/knowledge description -> the component 'description' column (from mcs.metadata.description)
+# ZIP-packaged skills (bic:bundle=) are NOT touched here -- they need the manual upload in Step 4.
 $translDir = Join-Path $agentDir "translations"
-$patched = 0; $skippedAssets = 0
+$dataPatched = 0; $descPatched = 0; $skippedAssets = 0
 if (Test-Path $translDir) {
-    # Map target components by name for matching.
-    $targetComps = (Invoke-RestMethod -Uri "$dvBase/botcomponents?`$filter=_parentbotid_value eq '$botId' and componenttype eq 9&`$select=botcomponentid,name,data" -Headers $dv).value
+    $targetComps = (Invoke-RestMethod -Uri "$dvBase/botcomponents?`$filter=_parentbotid_value eq '$botId' and componenttype eq 9&`$select=botcomponentid,name,description,data" -Headers $dv).value
     foreach ($file in (Get-ChildItem $translDir -Filter "*.mcs.yml")) {
-        $raw = Get-Content $file.FullName -Raw
+        $raw  = Get-Content $file.FullName -Raw
         $name = if ($raw -match "(?m)^\s*componentName:\s*(.+)$") { $Matches[1].Trim().Trim('"') } else { $null }
-        $idx  = $raw.IndexOf("kind:")
-        if (-not $name -or $idx -lt 0) { continue }
-        $localData = $raw.Substring($idx).TrimEnd()
-        # Skills with code assets carry a bic:bundle= pointer — those are handled by manual upload
-        # (Step 4), not by a data patch. Skip them here.
-        if ($localData -match "bic:bundle=") { $skippedAssets++; continue }
+        if (-not $name) { continue }
         $tc = $targetComps | Where-Object { $_.name -eq $name } | Select-Object -First 1
         if (-not $tc) { continue }
-        if (($tc.data ?? "").TrimEnd() -eq $localData) { continue }   # unchanged — no write
-        Invoke-RestMethod -Uri "$dvBase/botcomponents($($tc.botcomponentid))" -Method PATCH -Headers $dv -Body (@{ data = $localData } | ConvertTo-Json -Depth 1) | Out-Null
-        OK "  Updated '$name'"
-        $patched++
+
+        # (a) description column — from mcs.metadata.description (single-line). Safe for every kind.
+        if ($raw -match "(?m)^\s*description:\s*(.+)$") {
+            $desc = $Matches[1].Trim().Trim('"')
+            if ($desc -and (($tc.description ?? "").Trim() -ne $desc)) {
+                Invoke-RestMethod -Uri "$dvBase/botcomponents($($tc.botcomponentid))" -Method PATCH -Headers $dv -Body (@{ description = $desc } | ConvertTo-Json -Depth 1) | Out-Null
+                OK "  Description updated: '$name'"
+                $descPatched++
+            }
+        }
+
+        # (b) inline-skill content — the body from 'kind:' onward maps 1:1 to the 'data' field.
+        $idx = $raw.IndexOf("kind:")
+        if ($idx -ge 0) {
+            $localData = $raw.Substring($idx).TrimEnd()
+            if ($localData -match "bic:bundle=") { $skippedAssets++; continue }   # ZIP skill -> Step 4
+            if ($localData -match "kind:\s*InlineAgentSkill" -and (($tc.data ?? "").TrimEnd() -ne $localData)) {
+                Invoke-RestMethod -Uri "$dvBase/botcomponents($($tc.botcomponentid))" -Method PATCH -Headers $dv -Body (@{ data = $localData } | ConvertTo-Json -Depth 1) | Out-Null
+                OK "  Skill content updated: '$name'"
+                $dataPatched++
+            }
+        }
     }
 }
-if ($patched -eq 0) { INFO "No inline component edits to apply (everything matches the bundle)" }
-if ($skippedAssets -gt 0) { INFO "$skippedAssets code-asset skill(s) handled in Step 4, not here" }
+if (($dataPatched + $descPatched) -eq 0) { INFO "No inline-skill or description edits to apply (everything matches the bundle)" }
+if ($skippedAssets -gt 0) { INFO "$skippedAssets ZIP-packaged skill(s) handled in Step 4, not here" }
 
 # ── Step 4: Skills with code assets — manual re-upload ───────────────────────
 $skillsWithAssets = @()
@@ -214,20 +239,29 @@ if ($skillsWithAssets.Count -gt 0) {
         }
     }
     Write-Host ""
-    Write-Host "  These skills run Python/code. The code bundle is created only by uploading the" -ForegroundColor Yellow
-    Write-Host "  ZIP through the Copilot Studio UI (no API exists). Until then the skill is empty." -ForegroundColor Yellow
-    Write-Host "  For each skill: open the agent > click the skill > three-dot menu > Replace/Edit > upload the ZIP > Save." -ForegroundColor White
+    Write-Host "  These are ZIP-packaged skills (a .zip bundling Python + SKILL.md). Their code bundle" -ForegroundColor Yellow
+    Write-Host "  lives in the SOURCE environment's storage and cannot transfer — so the skill arrives" -ForegroundColor Yellow
+    Write-Host "  empty and Copilot Studio will flag it. Re-upload the ZIP once to recreate it here:" -ForegroundColor Yellow
+    Write-Host "    open the agent > click the skill > three-dot menu > Replace/Edit > upload the ZIP > Save." -ForegroundColor White
+    Write-Host "  (Skills with code written INLINE in the skill text transfer fine and need nothing.)" -ForegroundColor DarkGray
 }
 
-# ── Step 5: Connection wiring (if connectors present) ────────────────────────
+# ── Step 5: Activate flows (connection + turn on) ────────────────────────────
+# Flows import already linked to the agent's tools (GUIDs preserved by solution import). They
+# arrive turned OFF with an empty connection reference. There is nothing to "add" to the agent —
+# only activate each flow: assign a connection, then turn it on.
 $connectors = @()
 if ($manifest.PSObject.Properties["connectorsRequired"] -and $manifest.connectorsRequired) { $connectors = @($manifest.connectorsRequired) }
 if ($connectors.Count -gt 0) {
-    Step "Step 5 -- Wire connections (one-time per environment)"
-    Write-Host "    Connector(s) used by this agent's flows:" -ForegroundColor Yellow
+    Step "Step 5 -- Activate the agent's flows (one-time per environment)"
+    Write-Host "  The flows are already imported and linked to the agent. They just need activating:" -ForegroundColor Yellow
+    Write-Host "    1. Open https://make.powerautomate.com and switch to this environment." -ForegroundColor White
+    Write-Host "    2. Under Solutions (or My flows), open each imported flow." -ForegroundColor White
+    Write-Host "    3. It shows 'This flow uses a connection that needs to be fixed' -- assign/create a" -ForegroundColor White
+    Write-Host "       connection for each connector below, then Save." -ForegroundColor White
+    Write-Host "    4. Turn the flow On." -ForegroundColor White
+    Write-Host "    Connector(s) used:" -ForegroundColor Yellow
     $connectors | ForEach-Object { Write-Host "      - $_" -ForegroundColor White }
-    Write-Host "    In https://make.powerautomate.com (your target env): open each flow, assign a" -ForegroundColor White
-    Write-Host "    connection per connector, save and turn it on." -ForegroundColor White
 }
 
 # ── Step 6: PUBLISH (the one runtime step that always applies) ────────────────
@@ -251,7 +285,11 @@ Write-Host ""
 Write-Host "  Applied:"
 Write-Host "    [x] Structure imported (tools, skills, flows, knowledge, eval cases)"
 Write-Host "    [x] Instructions + model/AI settings"
-if ($patched -gt 0) { Write-Host "    [x] $patched inline component edit(s)" } else { Write-Host "    [-] No inline component edits" }
-if ($skillsWithAssets.Count -gt 0) { Write-Host "    [!] $($skillsWithAssets.Count) code-asset skill(s): upload ZIP in CS (Step 4)" -ForegroundColor Yellow }
-if ($connectors.Count -gt 0)       { Write-Host "    [!] Wire connection(s) in Power Automate (Step 5)" -ForegroundColor Yellow }
+if (($dataPatched + $descPatched) -gt 0) {
+    Write-Host "    [x] Edits applied: $dataPatched skill content, $descPatched description(s)"
+} else {
+    Write-Host "    [-] No inline-skill / description edits"
+}
+if ($skillsWithAssets.Count -gt 0) { Write-Host "    [!] $($skillsWithAssets.Count) ZIP-packaged skill(s): upload ZIP in CS (Step 4)" -ForegroundColor Yellow }
+if ($connectors.Count -gt 0)       { Write-Host "    [!] Activate flow(s) in Power Automate: connection + turn on (Step 5)" -ForegroundColor Yellow }
 Write-Host "    [>] PUBLISH in Copilot Studio to go live (Step 6)" -ForegroundColor Yellow

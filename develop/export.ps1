@@ -164,10 +164,11 @@ Write-Host "  Instructions  : sample\$AgentName.instructions.md   (edit -> deplo
 Write-Host "  Model/AI cfg  : sample\agent-config.json            (edit -> deploys)"
 Write-Host "  Deploy bundle : $(Split-Path $bundleZip -Leaf)"
 Write-Host ""
-Write-Host "  WHAT YOU CAN EDIT AND DEPLOY:" -ForegroundColor Cyan
-Write-Host "    [deploys]     instructions ($AgentName.instructions.md), model + AI settings (agent-config.json)"
-Write-Host "    [not via CLI] adding/removing tools, connectors, skills, flows, or tool wiring" -ForegroundColor Yellow
-Write-Host "                  -> make structural changes in Copilot Studio, then re-run this export." -ForegroundColor Yellow
+Write-Host "  WHAT YOU CAN EDIT IN VS CODE AND DEPLOY:" -ForegroundColor Cyan
+Write-Host "    [deploys] instructions ($AgentName.instructions.md), model + AI settings (agent-config.json),"
+Write-Host "              inline-skill content + tool/skill/knowledge descriptions (sample\$AgentName\translations\*)"
+Write-Host "    [CS UI]   add/remove tools, connectors, flows; ZIP-packaged code skills; file knowledge" -ForegroundColor Yellow
+Write-Host "              -> make those changes in Copilot Studio, then re-run this export." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  Deploy with:"
 Write-Host "    .\develop\install.ps1 -BundleZip '$bundleZip' -TargetOrgUrl <url>" -ForegroundColor Cyan

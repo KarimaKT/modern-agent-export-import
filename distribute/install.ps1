@@ -238,14 +238,14 @@ if ($skillsWithAssets.Count -gt 0) {
     $agentUrl = "https://copilotstudio.microsoft.com/environments/$envId/agents/$botId"
 
     Write-Host ""
-    Write-Host "  ==========================================================" -ForegroundColor Red
-    Write-Host "  ACTION REQUIRED: Skills with code assets need manual upload" -ForegroundColor Red
-    Write-Host "  ==========================================================" -ForegroundColor Red
+    Write-Host "  =============================================================" -ForegroundColor Red
+    Write-Host "  ACTION REQUIRED: ZIP-packaged skills need a one-time re-upload" -ForegroundColor Red
+    Write-Host "  =============================================================" -ForegroundColor Red
     Write-Host ""
-    Write-Host "  The following skill(s) have Python or binary assets that cannot" -ForegroundColor Yellow
-    Write-Host "  be transferred automatically. The skill records exist in the agent" -ForegroundColor Yellow
-    Write-Host "  but are empty until you re-upload the ZIP files below." -ForegroundColor Yellow
-    Write-Host "  The agent will not work correctly until this step is complete." -ForegroundColor Yellow
+    Write-Host "  These skills were uploaded as a .zip bundling Python + SKILL.md. Their code bundle" -ForegroundColor Yellow
+    Write-Host "  lives in the SOURCE environment's storage and cannot transfer, so each skill arrives" -ForegroundColor Yellow
+    Write-Host "  empty and Copilot Studio will flag it. Re-upload the ZIP once to recreate it here." -ForegroundColor Yellow
+    Write-Host "  (Skills whose code is written INLINE in the skill text transfer fine -- nothing to do.)" -ForegroundColor DarkGray
     Write-Host ""
 
     # Write skill ZIPs to a stable location the user can access after the script completes.
@@ -349,19 +349,17 @@ if ($manifest.PSObject.Properties["connectorsRequired"] -and $manifest.connector
 
 if ($connectors.Count -gt 0) {
     Write-Host ""
-    WARN "ACTION REQUIRED — Connection wiring"
-    Write-Host "    The following connector(s) were referenced in the exported agent:" -ForegroundColor Yellow
+    WARN "Activate the agent's flows (connection + turn on)"
+    Write-Host "    The flows imported already linked to the agent -- they just arrive turned off with" -ForegroundColor Yellow
+    Write-Host "    no connection. To activate:" -ForegroundColor Yellow
+    Write-Host "      1. Open https://make.powerautomate.com and switch to environment: $envIdSummary" -ForegroundColor White
+    Write-Host "      2. Open each imported flow; it shows a connection that needs fixing." -ForegroundColor White
+    Write-Host "      3. Assign or create a connection for each connector below, then Save:" -ForegroundColor White
     foreach ($connector in $connectors) {
         $displayName = if ($connector.PSObject.Properties["displayName"]) { $connector.displayName } else { $connector }
-        Write-Host "      - $displayName" -ForegroundColor White
+        Write-Host "           - $displayName" -ForegroundColor White
     }
-    Write-Host ""
-    Write-Host "    Each Power Automate flow that uses a connector shows 'needs connection'." -ForegroundColor Yellow
-    Write-Host "    To wire connections:" -ForegroundColor Yellow
-    Write-Host "      1. Open https://make.powerautomate.com" -ForegroundColor White
-    Write-Host "      2. Switch to environment: $envIdSummary" -ForegroundColor White
-    Write-Host "      3. Open each affected flow and assign a valid connection per connector." -ForegroundColor White
-    Write-Host "      4. Save and turn on the flow." -ForegroundColor White
+    Write-Host "      4. Turn the flow On." -ForegroundColor White
     Write-Host "      5. Return to Copilot Studio and verify the agent runs end-to-end." -ForegroundColor White
 }
 

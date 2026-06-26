@@ -13,9 +13,17 @@
 1. **`pac solution import`** — deploys the full agent structure (bot, all tools, skills, flows,
    knowledge, eval cases) from a solution ZIP. Reliable. Used by BOTH paths.
 2. **Dataverse Web API PATCH of `bot.configuration`** — instructions, model, AI settings.
-3. **Dataverse Web API PATCH of an existing botcomponent's `data` field** — inline-skill markdown,
-   tool/knowledge descriptions. (Tested: the local YAML from `kind:` onward maps byte-for-byte to
-   the `data` field; a PATCH persists and is the field the runtime reads.)
+   (Tested: PATCH persists. Instructions: only collapse the editable markdown into the segments
+   array when the agent has exactly ONE StaticSegment; multi/dynamic-segment agents are left to
+   `agent-config.json` to avoid dropping dynamic segments.)
+3. **Dataverse Web API PATCH of an existing botcomponent** — two distinct fields, both tested:
+   - `data` field → **inline-skill** markdown. The local YAML from `kind:` onward maps byte-for-byte
+     to `data`, and it is the field the runtime reads. (Only for `kind: InlineAgentSkill` without a
+     `bic:bundle=` pointer; ZIP-packaged skills are excluded.)
+   - `description` column → **tool / skill descriptions** (the `mcs.metadata.description` in the
+     cloned `translations/*` YAML maps to this column, NOT into `data`). Patching `data` alone would
+     silently fail to update a description — both fields must be handled. (Knowledge-source
+     descriptions live in `knowledge/*` and are not reconciled by the develop install today.)
 
 The following pac commands are **unreliable for cliagent-* and are NOT used to deploy**:
 
@@ -408,6 +416,24 @@ If you hit this: file feedback on the platform issue. The workaround is to check
 connection reference records in PPAC / DV before export and confirm they have a valid
 `connectorid` foreign key set.
 
+### MCP tools — distinguish OOB from custom (reasoned, not tested in this toolkit)
+
+There are two kinds, and they behave differently. Neither was exercised in this toolkit's own
+tests — this is reasoned from the tested behavior of `ConnectorTool` (which carries a `connectorId`
+plus a `connectionReference`) and from how solution import handles connector records.
+
+- **OOB MCP** — a Microsoft-published MCP connector from the connector catalog. It is referenced
+  like any standard connector (`connectorId` pointing at a `shared_*` API). Expected to behave like
+  a `ConnectorTool`: the tool definition transfers in the solution; you wire a connection in the
+  target. No hosting on your side.
+- **Custom MCP** — your own MCP server, surfaced via a custom connector / your server URL. The tool
+  definition transfers, BUT: (a) the **custom connector** must exist in the target (custom connectors
+  with backing code provision unreliably — see below), and (b) the **server must be reachable at the
+  same URL** in the target. Dev-tunnel or environment-specific URLs break on import — use a stable
+  hosted URL or re-point the connection after import.
+
+Verify MCP behavior for your specific agent before relying on it.
+
 ### Known gap — Custom connectors with inline code
 
 Custom connectors with embedded C# script actions (Azure Functions backend) are known
@@ -415,11 +441,14 @@ to have unreliable provisioning during solution import. This is a platform-level
 independent of this toolkit. Prefer connectors without inline code, or isolate the
 code layer in flows/plugins.
 
-### Known gap — McpTool (MCP server tools)
+### Agent flows after import (tested)
 
-McpTool definitions export and import correctly. The MCP server itself must be running
-and reachable at the same URL in the target environment. Local servers with dev-tunnel
-URLs break on import — use a stable hosted URL or re-wire after import.
+Flows (WorkflowTool / TaskDialog) import via solution import with their **original GUIDs
+preserved**, so the tool→flow link stays intact — there is nothing to re-add to the agent. Tested
+state immediately after import: each flow's `statecode = 0` (**Draft / off**) and its connection
+reference imports with an empty `connectionid`. Activation is the only manual step: assign a
+connection, Save, and turn the flow On. This is standard Power Platform per-environment behavior,
+not specific to this toolkit.
 
 ### pac CLI roadmap
 
