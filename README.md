@@ -53,6 +53,8 @@ You get **one file**: `MyAgent-bundle.zip`. Share it, commit it, or email it.
 
 The agent appears in Copilot Studio. The script then prints the exact finishing steps **for that specific agent** — only the ones that actually apply.
 
+> **Want to preview first?** Add `-WhatIf` to the install command to see exactly what it would do — which agent it imports, which tables it recreates, which skills need a re-upload, which flows to turn on — **without changing anything**. Run it again without `-WhatIf` to actually install.
+
 > **Custom tables come along automatically.** If your agent's flows use a custom Dataverse table, the export bundles that table's design **plus one sample row**, and install recreates it for you — so a table-backed sample just works. (Only *your* tables; Microsoft's built-in tables already exist everywhere and are left alone. If a row already exists in the target, install won't add a duplicate.)
 >
 > **If install ever stops with a "missing dependency" message:** your agent needs something the target environment doesn't have yet (for example a custom connector). The message names exactly what's missing — add it in the target, then run install again. (The tool checks for this instead of pretending the install worked.)

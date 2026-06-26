@@ -551,15 +551,17 @@ try {
     $skillsDir = Join-Path $OutputDir "skills-with-assets"
     if (Test-Path $skillsDir) {
         Get-ChildItem $skillsDir -Recurse -File | ForEach-Object {
-            $entryName = $_.FullName.Replace($OutputDir + "\", "") -replace "\\", "/"
-            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entryName) | Out-Null
+            # Build a relative entry name robustly (string-replacing $OutputDir is fragile when the
+            # path form differs, e.g. 8.3 short names) — base entries under the known subfolder.
+            $rel = [System.IO.Path]::GetRelativePath($skillsDir, $_.FullName) -replace "\\", "/"
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, "skills-with-assets/$rel") | Out-Null
         }
     }
     $seedDir = Join-Path $OutputDir "seed-data"
     if (Test-Path $seedDir) {
         Get-ChildItem $seedDir -Recurse -File | ForEach-Object {
-            $entryName = $_.FullName.Replace($OutputDir + "\", "") -replace "\\", "/"
-            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entryName) | Out-Null
+            $rel = [System.IO.Path]::GetRelativePath($seedDir, $_.FullName) -replace "\\", "/"
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, "seed-data/$rel") | Out-Null
         }
     }
 } finally {

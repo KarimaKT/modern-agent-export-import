@@ -64,6 +64,7 @@ param(
     [string] $BundleDir    = "",
     [Parameter(Mandatory)]
     [string] $TargetOrgUrl,
+    [switch] $WhatIf,
     [int]    $AuthIndex    = 1,
     [string] $PacExe       = ""
 )
@@ -183,6 +184,38 @@ if (-not (Test-Path $manifestPath)) {
 
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 OK "Bundle validated — agent schema: $($manifest.agentSchema)"
+
+# ── -WhatIf: preview the plan, then stop without changing anything ─────────────
+if ($WhatIf) {
+    # NOTE: do NOT write `$x = if (...) { @() } else { @() }` — an if-block that outputs an empty
+    # array collapses to $null, which then throws on .Count under StrictMode. Pre-assign instead.
+    $seedT = @();   if ($manifest.PSObject.Properties["seedTables"])         { $seedT  = @($manifest.seedTables) }
+    $skillsW = @(); if ($manifest.PSObject.Properties["skillsWithAssets"])   { $skillsW = @($manifest.skillsWithAssets) }
+    $conns = @();   if ($manifest.PSObject.Properties["connectorsRequired"] -and $manifest.connectorsRequired) { $conns = @($manifest.connectorsRequired) }
+    Write-Host ""
+    Write-Host "  DRY RUN (-WhatIf): here's what install WOULD do to" -ForegroundColor Cyan
+    Write-Host "  $OrgNoTrail" -ForegroundColor Cyan
+    Write-Host "  (nothing below is actually changed)" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "   1. Import the agent '$($manifest.agentName)' and all its parts (tools, skills, flows, knowledge, test cases)."
+    if ($seedT.Count -gt 0) {
+        Write-Host "   2. Recreate $($seedT.Count) custom table(s) and add one sample row each (only if the table is empty):"
+        $seedT | ForEach-Object { Write-Host "        - $($_.logical)" }
+    } else { Write-Host "   2. No custom tables to recreate." }
+    if ($skillsW.Count -gt 0) {
+        Write-Host "   3. Ask you to re-upload $($skillsW.Count) code-file skill(s) once in Copilot Studio:"
+        $skillsW | ForEach-Object { Write-Host "        - $(if ($_.PSObject.Properties['skill']) { $_.skill } else { $_ })" }
+    } else { Write-Host "   3. No code-file skills to re-upload." }
+    if ($conns.Count -gt 0) {
+        Write-Host "   4. Tell you to activate the agent's flow(s) (add a connection + turn on) for:"
+        $conns | ForEach-Object { Write-Host "        - $_" }
+    } else { Write-Host "   4. No connector flows to activate." }
+    Write-Host "   5. Open the agent so you can click Publish."
+    Write-Host ""
+    OK "Dry run complete — no changes made. Re-run without -WhatIf to install."
+    if ($tempExtractDir -and (Test-Path $tempExtractDir)) { Remove-Item $tempExtractDir -Recurse -Force }
+    return
+}
 
 # Preflight the Dataverse token now (before the long import) so first-run auth problems surface
 # immediately with clear guidance rather than after pac runs. Reused for verification + seeding.

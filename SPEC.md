@@ -118,6 +118,13 @@ a Dataverse token, gives **clear, actionable guidance** instead of a raw error w
 The `pac` CLI is already auto-detected with an install message. Preflight returns the token so the
 script reuses it (no double calls). **Decision:** D11.
 
+### 4.9 `-WhatIf` dry run (preview before changing anything)
+Both install scripts accept `-WhatIf`. With it, the script reads the bundle, prints a plain-language
+plan of everything it *would* do to the target — import the agent, recreate/seed which custom
+tables, which skills need a one-time re-upload, which flows need activating, and the final publish —
+then exits **without making any change** (no import, no writes). Lets a cautious maker see the
+impact first. **Decision:** D12.
+
 ### 4.6 (was 4.5) the rest of the path behaviors continue below
 
 
@@ -267,6 +274,8 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
   for low-code makers. (2026-06-26)
 - D11. **Friendly preflight** in every script: clear setup guidance when az/pac is missing or not
   signed in, or the environment is unreachable, instead of a cryptic token error. (2026-06-26)
+- D12. **`-WhatIf` dry run** on both installs previews the full plan from the bundle and exits
+  without changing the target. (2026-06-26)
 
 ---
 
@@ -282,6 +291,9 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
 - 8.7 `az account get-access-token --resource <url>` succeeds for **any** URL (Azure AD doesn't
   validate the resource exists), so a wrong environment URL passes the token step and fails later
   with a cryptic DNS error. Preflight therefore probes the environment with a `WhoAmI` call.
+- 8.8 Bundle zip entry names must be built with `[IO.Path]::GetRelativePath(<subfolder>, file)`, not
+  by string-replacing `$OutputDir` — the latter silently produces ABSOLUTE entries when the path
+  form differs (e.g. 8.3 short names like `KKANJI~1` vs the long name), which then breaks extraction.
 
 ---
 
@@ -302,7 +314,9 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
   one row if empty. (System tables are never bundled; seed insert is best-effort.)
 - U2. ~~Auto-detect the agent id / offer a picker.~~ **RESOLVED (§4.7, D10):** export accepts
   `-AgentName` and resolves the id among modern agents, with an interactive pick when ambiguous.
-- U3. Optional `-WhatIf` dry run for both installs.
+- U3. ~~Optional `-WhatIf` dry run for both installs.~~ **RESOLVED (§4.9, D12):** `-WhatIf` prints
+  exactly what the install would do (import, table seeding, skill re-uploads, flow activation,
+  publish) from the bundle manifest, then exits without touching the target.
 - U4. Multi-agent export (whole environment).
 - U5. Convert all **R** rows in §5 to **T** with purpose-built test agents.
 - U6. ~~Friendly first-run checks.~~ **RESOLVED (§4.8, D11):** all scripts run a preflight that gives
@@ -348,3 +362,12 @@ A wrong/unreachable environment URL now stops immediately at the token step with
 reach the environment... check the URL" message (verified) instead of a later cryptic DNS error —
 the preflight probes with `WhoAmI` because `az` issues a token for any URL. Missing-`az` and
 not-signed-in branches give install/`az login` guidance.
+
+**U3 — `-WhatIf` dry run (2026-06-26):** both installs preview the full plan (import, table recreate
++ seed, local edits [develop], skill re-uploads, flow activation, publish) and exit without changing
+the target. Verified on a table-backed bundle. **A latent bug surfaced and was fixed:** bundle zip
+entries were built by string-replacing `$OutputDir`, which produced ABSOLUTE entry paths when the
+path form differed (8.3 short name `KKANJI~1` vs long), breaking extraction — now uses
+`[IO.Path]::GetRelativePath`. Also fixed a StrictMode `.Count` crash from the PowerShell
+`$x = if(){@()}` empty-array-collapses-to-null gotcha. Real install of the same bundle confirmed
+extraction + seeding work.
