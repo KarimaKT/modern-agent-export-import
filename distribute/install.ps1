@@ -79,6 +79,30 @@ function OK([string]$msg)   { Write-Host "    OK  $msg" -ForegroundColor Green }
 function WARN([string]$msg) { Write-Host "    !   $msg" -ForegroundColor Yellow }
 function INFO([string]$msg) { Write-Host "        $msg" -ForegroundColor DarkGray }
 
+# Friendly preflight (see distribute/export.ps1): clear guidance when az is missing, not signed in,
+# or the environment is unreachable. Returns the access token.
+function Get-DvToken {
+    param([string]$OrgUrl)
+    if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+        Write-Error "The Azure CLI ('az') is not installed. Install it from https://aka.ms/installazurecliwindows, run 'az login', then retry."
+    }
+    $raw = az account get-access-token --resource $OrgUrl 2>&1
+    $tok = $null
+    try { $tok = ($raw | ConvertFrom-Json).accessToken } catch {}
+    if (-not $tok) {
+        $signedIn = $false
+        try { if (az account show 2>$null) { $signedIn = $true } } catch {}
+        if (-not $signedIn) { Write-Error "You're not signed in to Azure. Run 'az login' (use the account that can access this environment), then retry." }
+        Write-Error "Couldn't get access to '$OrgUrl'. Check the environment URL is correct and that your signed-in account has access to that tenant/environment. (az said: $raw)"
+    }
+    try {
+        Invoke-RestMethod -Uri "$OrgUrl/api/data/v9.2/WhoAmI" -Headers @{ Authorization="Bearer $tok"; Accept="application/json" } -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Error "Couldn't reach the environment at '$OrgUrl'. Check the URL is your Dataverse org URL (like https://yourorg.crm.dynamics.com) and that your account has access. ($($_.Exception.Message))"
+    }
+    return $tok
+}
+
 # ---------------------------------------------------------------------------
 # Normalise org URL (strip trailing slash)
 # ---------------------------------------------------------------------------
@@ -160,6 +184,11 @@ if (-not (Test-Path $manifestPath)) {
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 OK "Bundle validated — agent schema: $($manifest.agentSchema)"
 
+# Preflight the Dataverse token now (before the long import) so first-run auth problems surface
+# immediately with clear guidance rather than after pac runs. Reused for verification + seeding.
+$token  = Get-DvToken -OrgUrl $OrgNoTrail
+$verHdr = @{ Authorization = "Bearer $token"; Accept = "application/json" }
+
 # ---------------------------------------------------------------------------
 # Step 1 — pac solution import
 # ---------------------------------------------------------------------------
@@ -180,8 +209,6 @@ $importText = ($importOut | Out-String)
 $importFailed = ($importExit -ne 0) -or ($importText -match 'cannot be imported|Missing dependenc|FAILURE|^\s*Error:')
 
 INFO "Verifying the agent actually imported (querying Dataverse)..."
-$verToken = (az account get-access-token --resource $OrgNoTrail | ConvertFrom-Json).accessToken
-$verHdr   = @{ Authorization = "Bearer $verToken"; Accept = "application/json" }
 $verBot   = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/bots?`$filter=schemaname eq '$($manifest.agentSchema)'&`$select=botid,name" -Headers $verHdr).value | Select-Object -First 1
 
 if ($importFailed -or -not $verBot) {

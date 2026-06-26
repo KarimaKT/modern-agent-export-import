@@ -108,6 +108,16 @@ as an alternative to its id:
   `-AgentName` as the local folder name; it now doubles as the resolver.)
 **Decision:** D10. **Backlog U2 resolved by this.**
 
+### 4.8 Friendly first-run checks (preflight)
+Low-code makers may not have the CLIs installed or signed in. Each script, at the point it acquires
+a Dataverse token, gives **clear, actionable guidance** instead of a raw error when:
+- the **Azure CLI** (`az`) isn't installed → link to install it;
+- `az` isn't signed in → tell them to run `az login`;
+- the **environment URL** can't be reached / token can't be acquired → say the URL may be wrong or
+  they may need to sign in to that tenant.
+The `pac` CLI is already auto-detected with an install message. Preflight returns the token so the
+script reuses it (no double calls). **Decision:** D11.
+
 ### 4.6 (was 4.5) the rest of the path behaviors continue below
 
 
@@ -255,6 +265,8 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
 - D10. **Export accepts an agent by name** (`-AgentName`) as an alternative to `-BotId`, resolving
   among modern agents with an interactive pick when ambiguous. Removes the "find the GUID" friction
   for low-code makers. (2026-06-26)
+- D11. **Friendly preflight** in every script: clear setup guidance when az/pac is missing or not
+  signed in, or the environment is unreachable, instead of a cryptic token error. (2026-06-26)
 
 ---
 
@@ -267,6 +279,9 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
   in the target. Only a CS UI upload recreates it.
 - 8.5 A tool/skill **description** lives in the `description` column, not in `data`.
 - 8.6 `pac copilot publish` / `pack` / `pull` crash for modern agents. Publish is a UI step.
+- 8.7 `az account get-access-token --resource <url>` succeeds for **any** URL (Azure AD doesn't
+  validate the resource exists), so a wrong environment URL passes the token step and fails later
+  with a cryptic DNS error. Preflight therefore probes the environment with a `WhoAmI` call.
 
 ---
 
@@ -282,7 +297,6 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
 ---
 
 ## 10. UX backlog (improvements to make it more generic / easier)
-
 - U1. ~~Self-contained samples for table-backed agents.~~ **RESOLVED (§4.5, D9):** export now
   auto-bundles each custom table's definition + 1 seed row; install recreates the table and seeds
   one row if empty. (System tables are never bundled; seed insert is best-effort.)
@@ -291,6 +305,9 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
 - U3. Optional `-WhatIf` dry run for both installs.
 - U4. Multi-agent export (whole environment).
 - U5. Convert all **R** rows in §5 to **T** with purpose-built test agents.
+- U6. ~~Friendly first-run checks.~~ **RESOLVED (§4.8, D11):** all scripts run a preflight that gives
+  clear setup guidance when the Azure CLI / Power Platform CLI is missing or not signed in, or the
+  environment can't be reached — instead of a cryptic token error.
 
 ---
 
@@ -325,3 +342,9 @@ Keep this section updated as evidence is added or invalidated.
 listing available modern agents; ambiguous non-interactive → errors listing candidate ids). Real
 end-to-end: exported "Fabric Analyst" with `-AgentName` (no `-BotId`) → resolved + full export;
 a nonexistent name errors with the available-agents list. `-BotId` path unaffected (all prior tests).
+
+**U6 — friendly preflight (2026-06-26):** happy path unchanged (token acquired + export works).
+A wrong/unreachable environment URL now stops immediately at the token step with a clear "Couldn't
+reach the environment... check the URL" message (verified) instead of a later cryptic DNS error —
+the preflight probes with `WhoAmI` because `az` issues a token for any URL. Missing-`az` and
+not-signed-in branches give install/`az login` guidance.
