@@ -230,9 +230,9 @@ Legend: ✅ transfers · ⚠️ transfers + one manual step · ❌ not supported
 | Knowledge — web links (+ description) | ✅ | T | Name, description, config all survive |
 | Knowledge — files (PDF/Word) | ✅ | R | Binary travels in the bundle (tested in a prior session) |
 | Test cases | ✅ | R | Carried in the bundle (prior session) |
-| Child-agent tools | ✅ | R | Child agent must exist in target by same schema name |
-| MCP tools — Microsoft-published (OOB) | ⚠️ | R | Behaves like a connector; wire a connection |
-| MCP tools — custom (your own server) | ⚠️ | R | Server must be reachable at same URL; custom connector must exist in target |
+| Child-agent tools (ConnectedAgentTool) | ✅ | T | References child by `botSchemaName`; child must exist in target |
+| MCP tools — Microsoft-published (OOB) | ✅ | T | Carries `connectorId` + connection ref like a ConnectorTool; wire a connection |
+| MCP tools — custom (your own server) | ⚠️ | R | Definition transfers; server must be reachable at same URL + custom connector in target |
 | Custom connectors with inline code | ❌ | R | Azure Functions provisioning is unreliable — platform issue |
 | Classic agents | ❌ | T | Different architecture — out of scope |
 
@@ -328,7 +328,10 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
   publish) from the bundle manifest, then exits without touching the target.
 - U4. ~~Multi-agent export (whole environment).~~ **RESOLVED (§4.10, D13):** `distribute/export-all.ps1`
   enumerates every modern agent in an environment and exports each to its own bundle, with a summary.
-- U5. Convert all **R** rows in §5 to **T** with purpose-built test agents.
+- U5. Convert remaining **R** rows in §5 to **T** with purpose-built test agents. **PARTIALLY DONE
+  (2026-06-26):** ConnectedAgentTool and Microsoft-published (OOB) MCP confirmed tested via
+  Presentation Buddy (which has both). Remaining R: custom MCP server, custom connectors with code,
+  and (from prior sessions) file knowledge + test cases — keep as R until exercised here.
 - U6. ~~Friendly first-run checks.~~ **RESOLVED (§4.8, D11):** all scripts run a preflight that gives
   clear setup guidance when the Azure CLI / Power Platform CLI is missing or not signed in, or the
   environment can't be reached — instead of a cryptic token error.
@@ -352,6 +355,14 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
   install before the feature). Re-install is idempotent (existing data → no duplicate seed).
 
 Keep this section updated as evidence is added or invalidated.
+
+**U5 — child-agent + MCP tools (2026-06-26):** Presentation Buddy has both a ConnectedAgentTool and
+a Microsoft-published MCP tool. ConnectedAgentTool: source data is `kind: ConnectedAgentTool /
+botSchemaName: Default_FabricAnalyst_dQTqzr` — it references the child **by schema name**; it
+transferred to the target intact and the child agent exists there, so it resolves. OOB MCP (Work IQ
+OneDrive): carries a Microsoft `connectorId` + connection reference exactly like a ConnectorTool and
+transferred intact (data byte-identical in target). Both rows moved R→T. Custom MCP servers and
+custom connectors with code remain reasoned-only (no such test agent available).
 
 **Batch 2 (2026-06-26) — edge cases, 2 fixes:**
 - No-table agent (Fabric Analyst): table logic is a clean no-op (seedTables=0, no seed-data, bundle

@@ -80,9 +80,12 @@ The agent appears in Copilot Studio. The script then prints the exact finishing 
 | Knowledge — files (PDF, Word) | ✅ | The file travels in the bundle |
 | Test cases | ✅ | Fully |
 | Custom Dataverse tables a flow uses | ✅ | Table design + one sample row are bundled and recreated |
-| Child-agent tools · MCP tools · custom connectors with code | see notes † | Transfer-able but need their target-side setup — verify for your agent |
+| Child-agent tools (one agent calling another) | ✅ | The child agent must already exist in the target (matched by its internal name) |
+| Connect-an-AI-service tools (Microsoft-published MCP) | ✅ | Comes across like a connector — give it a connection after install |
+| Your own MCP server tools | ⚠️ † | Comes across, but your server must be reachable at the same address and its connector must exist in the target |
+| Custom connectors that contain code | ❌ † | The code layer doesn't move reliably — a platform limit |
 
-† Reasoned from how connectors and solutions behave, but not exercised in this tool's own tests. See [LEARNINGS.md](LEARNINGS.md).
+† Not exercised in this tool's own tests. See [LEARNINGS.md](LEARNINGS.md).
 
 ---
 
