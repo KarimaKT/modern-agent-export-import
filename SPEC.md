@@ -80,16 +80,22 @@ depend on that table existing in the target. Without it, solution import fails.
      target — never bundle those; system/standard tables are skipped too).
   2. Add each custom table's **Entity** to the solution: `AddSolutionComponent ComponentType=1
      AddRequiredComponents=$true` (pulls the table's columns + choice sets). Import will recreate it.
-  3. Export **one** seed row per table to `seed-data/<logical>.json` — only the table's own custom
-     columns (those starting with the table's publisher prefix), excluding the primary-id and all
-     system/navigation fields. Record each table in `manifest.json` under `seedTables`
-     (`logical`, `setName`, `primaryName`).
+  3. Export up to **N sample rows** (default 5, set by `-SeedRows`) per table to
+     `seed-data/<logical>.json` as a JSON **array** — only the table's own custom columns (those
+     starting with the table's publisher prefix), excluding the primary-id and all system/navigation
+     fields. **Warn at export** that these rows ship in the bundle, so they must not contain
+     real/sensitive data. Record each table in `manifest.json` under `seedTables`
+     (`logical`, `setName`, `primaryName`, `rowCount`).
 - **install** (both paths): after a verified solution import, for each `seedTables` entry, if the
-  target table currently has **zero rows**, insert the one seed row. This is **best-effort and
+  target table currently has **zero rows**, insert all the sample rows and **warn the user they are
+  SAMPLE data to replace with their own**. Best-effort and non-fatal; never overwrites existing data
+  and re-installs don't duplicate (the empty-check guards it).*, insert the one seed row. This is **best-effort and
   non-fatal** — a failed seed insert warns but never aborts (the table and agent still installed).
 
-**Why one seed row:** enough for the agent to have realistic sample data to operate on, without
-shipping someone else's full dataset. Makers can add their own data afterward.
+**Why a few sample rows (not the whole table):** enough for the agent to demonstrate real behavior
+on first run, without shipping someone's full dataset. Default 5 (tunable via `-SeedRows`). The rows
+come from the source table, so the maker curates fictional/sample data there for a shareable sample;
+the export and import both warn that these are sample rows to replace.
 
 **Assumptions:** A8 (below). **Decision:** D9 (below). **Backlog U1 is now resolved by this.**
 
@@ -356,6 +362,8 @@ Any **R** row must be converted to **T** (or corrected) when a suitable test age
 
 Keep this section updated as evidence is added or invalidated.
 
+**Sample rows (5) + warnings (2026-06-29):** exported Presentation Buddy with -SeedRows 5; seed-data/<table>.json holds a 5-row JSON array; export warns the rows ship in the bundle (check for sensitive data). Installed into an emptied table: 5 rows inserted with a 'SAMPLE data — replace with your own' warning; verified 5 rows in Dataverse. Re-install is idempotent (table had data -> not seeded; stayed at 5).
+
 **U5 — child-agent + MCP tools (2026-06-26):** Presentation Buddy has both a ConnectedAgentTool and
 a Microsoft-published MCP tool. ConnectedAgentTool: source data is `kind: ConnectedAgentTool /
 botSchemaName: Default_FabricAnalyst_dQTqzr` — it references the child **by schema name**; it
@@ -401,3 +409,4 @@ referencing a **deleted flow** hard-aborted with a misleading "type not valid" e
 skips the missing flow; (3) two agents sharing a display name overwrote each other's bundle → each
 agent exports in an isolated work folder and collisions get a unique name (no data loss); (4)
 same-named agents shared one distribution solution (cross-contamination) → unique solution per agent.
+

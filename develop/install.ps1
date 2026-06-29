@@ -155,7 +155,7 @@ if ($WhatIf) {
     Write-Host "  $OrgNoTrail  (nothing is actually changed)" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "   1. Import the agent '$($manifest.agentName)' and all its parts."
-    if ($seedT.Count -gt 0) { Write-Host "   2. Recreate $($seedT.Count) custom table(s) + one sample row each (if empty)." } else { Write-Host "   2. No custom tables to recreate." }
+    if ($seedT.Count -gt 0) { Write-Host "   2. Recreate $($seedT.Count) custom table(s) + add their sample rows (only if empty)." } else { Write-Host "   2. No custom tables to recreate." }
     if ($hasEdits) { Write-Host "   3. Apply your edits from sample\$AgentName\ (instructions / model / skill text / descriptions)." } else { Write-Host "   3. No local edits folder found -- bundle deployed as-is." }
     if ($skillsW.Count -gt 0) { Write-Host "   4. Ask you to re-upload $($skillsW.Count) code-file skill(s) once in Copilot Studio." } else { Write-Host "   4. No code-file skills to re-upload." }
     if ($conns.Count -gt 0) { Write-Host "   5. Tell you to activate the agent's flow(s) (connection + turn on)." } else { Write-Host "   5. No connector flows to activate." }
@@ -196,24 +196,32 @@ if (($importExit -ne 0) -or ($importText -match 'cannot be imported|Missing depe
 $botId = $bot.botid
 OK "Solution imported -- bot present: $($bot.name) ($botId)"
 
-# ── Step 1b: Seed custom tables (best-effort, non-fatal) ──────────────────────
+# ── Step 1b: Seed custom tables with SAMPLE data (best-effort, non-fatal) ─────
 $seedTables = @()
 if ($manifest.PSObject.Properties["seedTables"]) { $seedTables = @($manifest.seedTables) }
 if ($seedTables.Count -gt 0) {
     Step "Step 1b -- Seeding $($seedTables.Count) custom table(s) with sample data"
+    $seededAny = $false
     foreach ($tbl in $seedTables) {
         try {
-            if (-not $tbl.hasSeed) { INFO "  '$($tbl.logical)': no seed row in bundle -- skipping"; continue }
+            if (-not $tbl.hasSeed) { INFO "  '$($tbl.logical)': no sample rows in bundle -- skipping"; continue }
             $existing = (Invoke-RestMethod -Uri "$dvBase/$($tbl.setName)?`$top=1&`$select=$($tbl.primaryName)" -Headers $dv).value
             if ($existing.Count -gt 0) { INFO "  '$($tbl.logical)': already has data -- not seeding"; continue }
             $seedFile = Join-Path $tempExtractDir "seed-data\$($tbl.logical).json"
             if (-not (Test-Path $seedFile)) { INFO "  '$($tbl.logical)': seed file missing -- skipping"; continue }
-            Invoke-RestMethod -Uri "$dvBase/$($tbl.setName)" -Method POST -Headers $dv -Body (Get-Content $seedFile -Raw) | Out-Null
-            OK "  '$($tbl.logical)': seeded 1 sample row"
+            $rows = @(Get-Content $seedFile -Raw | ConvertFrom-Json)
+            $n = 0
+            foreach ($row in $rows) {
+                Invoke-RestMethod -Uri "$dvBase/$($tbl.setName)" -Method POST -Headers $dv -Body ($row | ConvertTo-Json -Depth 5) | Out-Null
+                $n++
+            }
+            OK "  '$($tbl.logical)': seeded $n sample row(s)"
+            if ($n -gt 0) { $seededAny = $true }
         } catch {
             WARN "  '$($tbl.logical)': could not seed ($($_.Exception.Message))"
         }
     }
+    if ($seededAny) { WARN "Those are SAMPLE rows shipped with the agent -- replace them with your own data before real use." }
 }
 
 # ── Step 2: Apply instruction / model / AI-settings edits (bot.configuration) ─

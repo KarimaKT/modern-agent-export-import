@@ -97,6 +97,7 @@ param(
     [Parameter(Mandatory)][string] $SolutionName,
     [Parameter(Mandatory)][string] $PublisherName,
     [string] $OutputDir  = ".",
+    [int]    $SeedRows   = 5,
     [int]    $AuthIndex  = 1,
     [string] $PacExe     = ""
 )
@@ -421,7 +422,7 @@ foreach ($ref in $tableRefs) {
         primaryId   = $ent.PrimaryIdAttribute
         primaryName = $ent.PrimaryNameAttribute
     }
-    OK "Bundled custom table '$($ent.LogicalName)' (definition + 1 seed row)"
+    OK "Bundled custom table '$($ent.LogicalName)' (definition + sample rows)"
 }
 if ($seedTables.Count -eq 0) { INFO "No custom table dependencies to bundle" }
 
@@ -499,31 +500,45 @@ foreach ($skill in $skillsWithAssets) {
     $skillManifest += @{ skill = $skill.name; files = $files }
 }
 
-# ── Step 5b: Export one seed row per bundled custom table ──────────────────────
-Step "Step 5b — Export seed data for custom tables ($($seedTables.Count))"
+# ── Step 5b: Export up to N sample rows per bundled custom table ──────────────
+Step "Step 5b — Export sample data for custom tables ($($seedTables.Count), up to $SeedRows row(s) each)"
 $seedManifest = @()
+$anySeeded = $false
 foreach ($tbl in $seedTables) {
     try {
-        $row = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/$($tbl.setName)?`$top=1" -Headers $dv).value | Select-Object -First 1
-        if (-not $row) { INFO "  '$($tbl.logical)': source table empty — no seed row"; $seedManifest += @{ logical=$tbl.logical; setName=$tbl.setName; primaryName=$tbl.primaryName; hasSeed=$false }; continue }
+        $rows = @()
+        if ($SeedRows -gt 0) {
+            $rows = @((Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/$($tbl.setName)?`$top=$SeedRows" -Headers $dv).value)
+        }
+        if ($rows.Count -eq 0) { INFO "  '$($tbl.logical)': no sample rows (source empty or -SeedRows 0)"; $seedManifest += @{ logical=$tbl.logical; setName=$tbl.setName; primaryName=$tbl.primaryName; hasSeed=$false; rowCount=0 }; continue }
         # Keep only this table's own data columns: prefix_* columns, excluding the primary id and any
-        # navigation/system fields. The primary id is dropped so the target generates a fresh GUID.
+        # navigation/system fields. The primary id is dropped so the target generates fresh GUIDs.
         $prefix = ($tbl.logical -split '_')[0] + '_'
-        $seed = @{}
-        foreach ($p in $row.PSObject.Properties) {
-            if ($p.Name -like "$prefix*" -and $p.Name -ne $tbl.primaryId -and $p.Name -notlike '_*' -and $p.Name -notmatch '@') {
-                $seed[$p.Name] = $p.Value
+        $seedRowsOut = @()
+        foreach ($row in $rows) {
+            $seed = [ordered]@{}
+            foreach ($p in $row.PSObject.Properties) {
+                if ($p.Name -like "$prefix*" -and $p.Name -ne $tbl.primaryId -and $p.Name -notlike '_*' -and $p.Name -notmatch '@') {
+                    $seed[$p.Name] = $p.Value
+                }
             }
+            if ($seed.Count -gt 0) { $seedRowsOut += $seed }
         }
         $seedDir = Join-Path $OutputDir "seed-data"
         New-Item -ItemType Directory -Force -Path $seedDir | Out-Null
-        ($seed | ConvertTo-Json -Depth 5) | Set-Content (Join-Path $seedDir "$($tbl.logical).json") -Encoding UTF8
-        OK "  '$($tbl.logical)': 1 seed row ($($seed.Keys.Count) columns)"
-        $seedManifest += @{ logical=$tbl.logical; setName=$tbl.setName; primaryName=$tbl.primaryName; hasSeed=$true }
+        # Always an array (even for one row) so install can iterate uniformly.
+        ConvertTo-Json @($seedRowsOut) -Depth 5 | Set-Content (Join-Path $seedDir "$($tbl.logical).json") -Encoding UTF8
+        OK "  '$($tbl.logical)': $($seedRowsOut.Count) sample row(s)"
+        $seedManifest += @{ logical=$tbl.logical; setName=$tbl.setName; primaryName=$tbl.primaryName; hasSeed=$true; rowCount=$seedRowsOut.Count }
+        $anySeeded = $true
     } catch {
-        WARN "  '$($tbl.logical)': could not export seed row ($($_.Exception.Message))"
-        $seedManifest += @{ logical=$tbl.logical; setName=$tbl.setName; primaryName=$tbl.primaryName; hasSeed=$false }
+        WARN "  '$($tbl.logical)': could not export sample rows ($($_.Exception.Message))"
+        $seedManifest += @{ logical=$tbl.logical; setName=$tbl.setName; primaryName=$tbl.primaryName; hasSeed=$false; rowCount=0 }
     }
+}
+if ($anySeeded) {
+    WARN "These sample rows ship inside the bundle. Make sure they contain only fictional/sample"
+    WARN "data — not real or sensitive records — since anyone you share the bundle with will see them."
 }
 
 # ── Step 6: Write manifest.json ───────────────────────────────────────────────

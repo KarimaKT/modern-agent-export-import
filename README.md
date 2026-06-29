@@ -55,7 +55,7 @@ The agent appears in Copilot Studio. The script then prints the exact finishing 
 
 > **Want to preview first?** Add `-WhatIf` to the install command to see exactly what it would do — which agent it imports, which tables it recreates, which skills need a re-upload, which flows to turn on — **without changing anything**. Run it again without `-WhatIf` to actually install.
 
-> **Custom tables come along automatically.** If your agent's flows use a custom Dataverse table, the export bundles that table's design **plus one sample row**, and install recreates it for you — so a table-backed sample just works. (Only *your* tables; Microsoft's built-in tables already exist everywhere and are left alone. If a row already exists in the target, install won't add a duplicate.)
+> **Custom tables come along automatically.** If your agent's flows use a custom Dataverse table, the export bundles that table's design **plus a few sample rows** (5 by default, set with `-SeedRows`), and install recreates the table and adds those rows for you — so a table-backed sample just works. (Only *your* tables; Microsoft's built-in tables already exist everywhere and are left alone. If a row already exists in the target, install won't add a duplicate.)
 >
 > **If install ever stops with a "missing dependency" message:** your agent needs something the target environment doesn't have yet (for example a custom connector). The message names exactly what's missing — add it in the target, then run install again. (The tool checks for this instead of pretending the install worked.)
 
@@ -79,7 +79,7 @@ The agent appears in Copilot Studio. The script then prints the exact finishing 
 | Knowledge — web links | ✅ | Link and its description come across |
 | Knowledge — files (PDF, Word) | ✅ | The file travels in the bundle |
 | Test cases | ✅ | Fully |
-| Custom Dataverse tables a flow uses | ✅ | Table design + one sample row are bundled and recreated |
+| Custom Dataverse tables a flow uses | ✅ | Table design + a few sample rows are bundled; install adds them if the table is empty |
 | Child-agent tools (one agent calling another) | ✅ | The child agent must already exist in the target (matched by its internal name) |
 | Connect-an-AI-service tools (Microsoft-published MCP) | ✅ | Comes across like a connector — give it a connection after install |
 | Your own MCP server tools | ⚠️ † | Comes across, but your server must be reachable at the same address and its connector must exist in the target |
@@ -143,3 +143,5 @@ CONTRIBUTING.md · SECURITY.md · SUPPORT.md · CODE_OF_CONDUCT.md
 ```
 
 > **Back up or migrate a whole environment:** `distribute\export-all.ps1 -SourceOrgUrl "..." -PublisherName "yourprefix"` exports every modern agent into its own bundle in one folder.
+
+

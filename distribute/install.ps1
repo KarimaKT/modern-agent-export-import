@@ -262,31 +262,41 @@ if ($importFailed -or -not $verBot) {
 OK "pac solution import verified -- bot present: $($verBot.name) ($($verBot.botid))"
 
 # ---------------------------------------------------------------------------
-# Step 1b — Seed custom tables (make the sample usable immediately)
+# Step 1b — Seed custom tables with SAMPLE data (make the sample usable immediately)
 # ---------------------------------------------------------------------------
 # The bundle may include custom Dataverse tables the agent's flows use. Solution import recreates
-# the table definitions; here we add one sample row per table IF it is currently empty, so the
-# installed sample has realistic data to work with. Best-effort and NON-FATAL: a failed seed never
-# aborts the install (the table and agent are already in place).
+# the table definitions; here we add the bundled SAMPLE rows IF the table is currently empty, so the
+# installed sample has data to work with on first run. Best-effort and NON-FATAL: a failed seed
+# never aborts the install (the table and agent are already in place), and the empty-check means we
+# never overwrite a maker's real data or duplicate on re-install.
 $seedTables = @()
 if ($manifest.PSObject.Properties["seedTables"]) { $seedTables = @($manifest.seedTables) }
 if ($seedTables.Count -gt 0) {
     Step "Step 1b — Seeding $($seedTables.Count) custom table(s) with sample data"
-    $seedToken = (az account get-access-token --resource $OrgNoTrail | ConvertFrom-Json).accessToken
-    $seedDv = @{ Authorization="Bearer $seedToken"; "OData-MaxVersion"="4.0"; "OData-Version"="4.0"; Accept="application/json"; "Content-Type"="application/json" }
+    $seedDv = $verHdr + @{ "OData-MaxVersion"="4.0"; "OData-Version"="4.0"; "Content-Type"="application/json" }
+    $seededAny = $false
     foreach ($tbl in $seedTables) {
         try {
-            if (-not $tbl.hasSeed) { INFO "  '$($tbl.logical)': no seed row in bundle — skipping"; continue }
+            if (-not $tbl.hasSeed) { INFO "  '$($tbl.logical)': no sample rows in bundle — skipping"; continue }
             $existing = (Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/$($tbl.setName)?`$top=1&`$select=$($tbl.primaryName)" -Headers $seedDv).value
             if ($existing.Count -gt 0) { INFO "  '$($tbl.logical)': already has data — not seeding"; continue }
             $seedFile = Join-Path $BundleDir "seed-data\$($tbl.logical).json"
             if (-not (Test-Path $seedFile)) { INFO "  '$($tbl.logical)': seed file missing — skipping"; continue }
-            $seedBody = Get-Content $seedFile -Raw
-            Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/$($tbl.setName)" -Method POST -Headers $seedDv -Body $seedBody | Out-Null
-            OK "  '$($tbl.logical)': seeded 1 sample row"
+            $rows = @(Get-Content $seedFile -Raw | ConvertFrom-Json)
+            $n = 0
+            foreach ($row in $rows) {
+                Invoke-RestMethod -Uri "$OrgNoTrail/api/data/v9.2/$($tbl.setName)" -Method POST -Headers $seedDv -Body ($row | ConvertTo-Json -Depth 5) | Out-Null
+                $n++
+            }
+            OK "  '$($tbl.logical)': seeded $n sample row(s)"
+            if ($n -gt 0) { $seededAny = $true }
         } catch {
-            WARN "  '$($tbl.logical)': could not seed ($($_.Exception.Message)) — add a row manually if needed"
+            WARN "  '$($tbl.logical)': could not seed ($($_.Exception.Message)) — add rows manually if needed"
         }
+    }
+    if ($seededAny) {
+        WARN "The rows above are SAMPLE data shipped with this agent. Replace them with your own"
+        WARN "records in the target environment before real use."
     }
 }
 
